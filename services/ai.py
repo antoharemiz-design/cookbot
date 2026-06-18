@@ -46,7 +46,11 @@ async def get_recipe(products: str, extra_context: str = "") -> tuple[dict | Non
         )
         content = response.choices[0].message.content
         recipe = extract_json(content)
-        return recipe, content  # возвращаем и сырой ответ
+        return recipe, content
     except Exception as e:
+        error_str = str(e)
+        if "429" in error_str:
+            # Ошибка лимита запросов
+            return None, "RATE_LIMIT"
         print(f"Ошибка AI: {type(e).__name__}: {e}")
         return None, None
