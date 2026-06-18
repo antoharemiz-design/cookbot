@@ -3,12 +3,12 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.ai import get_recipe
-from database.db import add_favorite, get_favorites, remove_favorite
+from database.db import add_favorite, get_favorites, remove_favorite, set_last_recipe, get_last_recipe
 import json
 
 router = Router()
 
-# ----- Главное меню (обычные кнопки) -----
+# Главное меню
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -19,13 +19,11 @@ main_kb = ReplyKeyboardMarkup(
     input_field_placeholder="Выберите действие"
 )
 
-# ----- Вспомогательные клавиатуры -----
 back_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="🔙 Главное меню")]],
     resize_keyboard=True
 )
 
-# ----- Команда /start -----
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -36,12 +34,10 @@ async def cmd_start(message: types.Message):
         reply_markup=main_kb
     )
 
-# ----- Возврат в главное меню -----
 @router.message(F.text == "🔙 Главное меню")
 async def back_to_main(message: types.Message):
     await message.answer("Главное меню", reply_markup=main_kb)
 
-# ----- Кнопка "Придумать рецепт" -----
 @router.message(F.text == "🍳 Придумать рецепт")
 async def prompt_products(message: types.Message):
     await message.answer(
@@ -51,7 +47,6 @@ async def prompt_products(message: types.Message):
         parse_mode="HTML"
     )
 
-# ----- Кнопка "Мои избранные" -----
 @router.message(F.text == "⭐ Мои избранные")
 async def show_favorites(message: types.Message):
     favs = await get_favorites(message.from_user.id)
@@ -59,11 +54,9 @@ async def show_favorites(message: types.Message):
         await message.answer("У вас пока нет избранных рецептов.", reply_markup=main_kb)
         return
 
-    # Показываем список названий с кнопками для просмотра и удаления
     builder = InlineKeyboardBuilder()
     for i, rec in enumerate(favs):
         title = rec.get('title', f'Рецепт {i+1}')
-        # Обрезаем длинные названия
         short_title = title[:30] + '…' if len(title) > 30 else title
         builder.row(InlineKeyboardButton(
             text=short_title,
@@ -75,7 +68,6 @@ async def show_favorites(message: types.Message):
         reply_markup=builder.as_markup()
     )
 
-# ----- Обработчик инлайн-кнопок (просмотр/удаление из избранного) -----
 @router.callback_query(F.data.startswith("view_fav:"))
 async def view_favorite(callback: types.CallbackQuery):
     index = int(callback.data.split(":")[1])
@@ -86,7 +78,6 @@ async def view_favorite(callback: types.CallbackQuery):
 
     recipe = favs[index]
     text = format_recipe(recipe)
-    # Кнопка удаления
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(
         text="🗑 Удалить из избранного",
@@ -110,7 +101,7 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# ----- Обработка ввода продуктов или пожеланий -----
+# Обработка текстовых запросов
 @router.message(lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
     "🍳 Придумать рецепт", "⭐ Мои избранные", "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
 ])
@@ -120,77 +111,35 @@ async def generate_recipe(message: types.Message):
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
         return
 
-    # Загружаем предпочтения пользователя (если есть)
-    from database.db import DB_PATH
-    import aiosqlite
-    prefs = {}
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("SELECT diet, allergies, dislikes FROM user_prefs WHERE user_id = ?", (message.from_user.id,))
-        row = await cursor.fetchone()
-        if row:
-            prefs['diet'] = row[0]
-            prefs['allergies'] = row[1]
-            prefs['dislikes'] = row[2]
-
-    # Собираем промпт с учётом предпочтений
-    extra = ""
-    if prefs.get('diet'):
-        extra += f"Диета: {prefs['diet']}. "
-    if prefs.get('allergies'):
-        extra += f"Аллергии: {prefs['allergies']}. "
-    if prefs.get('dislikes'):
-        extra += f"Не любит: {prefs['dislikes']}. "
-    if extra:
-        extra = "Учти предпочтения: " + extra
-
     await message.answer("Готовлю рецепт...")
-    recipe = await get_recipe(user_input, extra_context=extra)  # обновим функцию ai.py
+    recipe = await get_recipe(user_input)  # extra_context пока не передаём
 
     if recipe is None:
         await message.answer("Не удалось создать рецепт. Попробуй другой запрос.")
         return
 
-    # Форматируем и показываем рецепт
+    # Сохраняем последний сгенерированный рецепт в БД
+    await set_last_recipe(message.from_user.id, recipe)
+
     response_text = format_recipe(recipe)
-
-    # Inline-кнопка "Добавить в избранное"
     builder = InlineKeyboardBuilder()
-    # Передаём рецепт как JSON в callback_data (с ограничением по длине)
-    recipe_json = json.dumps(recipe, ensure_ascii=False)
-    if len(recipe_json) > 3000:  # Telegram ограничение на callback_data 64 байта, но можно использовать cache или сократить
-        # Вместо этого сохраняем рецепт во временный словарь (в памяти) или используем короткий идентификатор
-        # Пока для простоты сделаем кнопку без данных, сохраняя через кэш (но лучше через БД сразу)
-        # Для MVP просто добавим кнопку, которая вызовет сохранение через сообщение
-        await message.answer(response_text, parse_mode="HTML")
-        await message.answer("Хотите сохранить рецепт в избранное? Нажмите /save", reply_markup=back_kb)
-    else:
-        builder.row(InlineKeyboardButton(
-            text="⭐ В избранное",
-            callback_data=f"save_fav:{recipe_json}"
-        ))
-        await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
+    builder.row(InlineKeyboardButton(
+        text="⭐ В избранное",
+        callback_data="save_last"
+    ))
+    await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
 
-# ----- Обработчик сохранения в избранное (inline) -----
-@router.callback_query(F.data.startswith("save_fav:"))
-async def save_to_favorites(callback: types.CallbackQuery):
-    recipe_json = callback.data.split(":", 1)[1]
-    try:
-        recipe = json.loads(recipe_json)
-    except:
-        await callback.answer("Ошибка сохранения.", show_alert=True)
+@router.callback_query(F.data == "save_last")
+async def save_last_recipe(callback: types.CallbackQuery):
+    recipe = await get_last_recipe(callback.from_user.id)
+    if recipe is None:
+        await callback.answer("Не найден рецепт для сохранения.", show_alert=True)
         return
     await add_favorite(callback.from_user.id, recipe)
     await callback.answer("Добавлено в избранное! ⭐", show_alert=True)
-    # Можно изменить кнопку или просто убрать
+    # Убираем кнопку, чтобы не смущать
     await callback.message.edit_reply_markup(reply_markup=None)
 
-# ----- Команда /save (если кнопка не влезла) -----
-@router.message(Command("save"))
-async def cmd_save(message: types.Message):
-    # Просим пользователя ответить на сообщение с рецептом, которое нужно сохранить
-    await message.answer("Ответьте на сообщение с рецептом, который хотите сохранить, командой /save")
-
-# ----- Кнопка "Помощь" -----
 @router.message(F.text == "❓ Помощь")
 async def help_cmd(message: types.Message):
     await message.answer(
@@ -202,7 +151,6 @@ async def help_cmd(message: types.Message):
         reply_markup=main_kb
     )
 
-# ----- Заглушка для профиля (позже сделаем полноценный) -----
 @router.message(F.text == "⚙️ Профиль")
 async def profile_menu(message: types.Message):
     await message.answer(
@@ -211,7 +159,6 @@ async def profile_menu(message: types.Message):
         reply_markup=main_kb
     )
 
-# Вспомогательная функция форматирования рецепта
 def format_recipe(recipe: dict) -> str:
     text = (
         f"🍽 <b>{recipe.get('title', 'Блюдо')}</b>\n"
