@@ -1,7 +1,7 @@
 import aiosqlite
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "cookbot.db"  # будет лежать в корне проекта
+DB_PATH = Path(__file__).parent.parent / "cookbot.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -19,6 +19,12 @@ async def init_db():
                 diet TEXT,
                 allergies TEXT,
                 dislikes TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS last_recipe (
+                user_id INTEGER PRIMARY KEY,
+                recipe_json TEXT NOT NULL
             )
         """)
         await db.commit()
@@ -45,7 +51,6 @@ async def get_favorites(user_id: int) -> list[dict]:
 
 async def remove_favorite(user_id: int, recipe_title: str):
     async with aiosqlite.connect(DB_PATH) as db:
-        # удаляем первый попавшийся с таким названием (можно усложнить)
         cursor = await db.execute(
             "SELECT rowid FROM favorites WHERE user_id = ? AND recipe_json LIKE ? LIMIT 1",
             (user_id, f'%{recipe_title}%')
@@ -56,3 +61,23 @@ async def remove_favorite(user_id: int, recipe_title: str):
             await db.commit()
             return True
     return False
+
+async def set_last_recipe(user_id: int, recipe: dict):
+    import json
+    recipe_str = json.dumps(recipe, ensure_ascii=False)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO last_recipe (user_id, recipe_json) VALUES (?, ?)",
+            (user_id, recipe_str)
+        )
+        await db.commit()
+
+async def get_last_recipe(user_id: int) -> dict | None:
+    import json
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT recipe_json FROM last_recipe WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return json.loads(row[0]) if row else None
