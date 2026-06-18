@@ -7,8 +7,9 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Настройки OpenRouter
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-MODEL_NAME = "qwen/qwen3-next-80b-a3b-instruct:free"
+OPENROUTER_BASE_URL = "https://api.groq.com/openai/v1"
+OPENROUTER_API_KEY = os.getenv("GROQ_API_KEY")   # можно переименовать переменную для ясности
+MODEL_NAME = "llama-3.1-8b-instant"
 # Системный промпт для поварского ИИ
 SYSTEM_PROMPT = """Ты — профессиональный шеф-повар. Пользователь напишет список продуктов, которые у него есть. Твоя задача — придумать реалистичный и вкусный рецепт.
 Ответь **строго** в формате JSON без каких-либо дополнительных комментариев, без маркдауна, без обрамления в ```json.
