@@ -4,7 +4,6 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.ai import get_recipe
 from database.db import add_favorite, get_favorites, remove_favorite, set_last_recipe, get_last_recipe
-import json
 
 router = Router()
 
@@ -112,12 +111,11 @@ async def generate_recipe(message: types.Message):
         return
 
     await message.answer("Готовлю рецепт...")
-        recipe, raw_response = await get_recipe(user_input)  # теперь функция возвращает кортеж
+    recipe, raw_response = await get_recipe(user_input)
 
     if recipe is None:
         debug_info = ""
         if raw_response:
-            # Обрезаем, чтобы не превысить лимит сообщения
             debug_info = f"\n\nОтладка (ответ модели):\n<pre>{raw_response[:1500]}</pre>"
         await message.answer(
             f"Не удалось создать рецепт.{debug_info}\nПопробуйте другой запрос.",
@@ -144,7 +142,6 @@ async def save_last_recipe(callback: types.CallbackQuery):
         return
     await add_favorite(callback.from_user.id, recipe)
     await callback.answer("Добавлено в избранное! ⭐", show_alert=True)
-    # Убираем кнопку, чтобы не смущать
     await callback.message.edit_reply_markup(reply_markup=None)
 
 @router.message(F.text == "❓ Помощь")
