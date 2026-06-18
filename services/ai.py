@@ -3,6 +3,7 @@ import re
 from openai import AsyncOpenAI
 from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, MODEL_NAME, SYSTEM_PROMPT
 
+print(f"DEBUG: OPENROUTER_API_KEY starts with: {OPENROUTER_API_KEY[:10] if OPENROUTER_API_KEY else 'None'}...")
 client = AsyncOpenAI(
     api_key=OPENROUTER_API_KEY,
     base_url=OPENROUTER_BASE_URL,
