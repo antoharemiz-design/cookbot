@@ -114,13 +114,16 @@ async def generate_recipe(message: types.Message):
     recipe, raw_response = await get_recipe(user_input)
 
     if recipe is None:
-        debug_info = ""
-        if raw_response:
-            debug_info = f"\n\nОтладка (ответ модели):\n<pre>{raw_response[:1500]}</pre>"
-        await message.answer(
-            f"Не удалось создать рецепт.{debug_info}\nПопробуйте другой запрос.",
-            parse_mode="HTML"
-        )
+        if raw_response == "RATE_LIMIT":
+            await message.answer("Слишком много запросов. Попробуйте через минуту.")
+        else:
+            debug_info = ""
+            if raw_response:
+                debug_info = f"\n\nОтладка (ответ модели):\n<pre>{raw_response[:1500]}</pre>"
+            await message.answer(
+                f"Не удалось создать рецепт.{debug_info}\nПопробуйте другой запрос.",
+                parse_mode="HTML"
+            )
         return
 
     # Сохраняем последний сгенерированный рецепт в БД
