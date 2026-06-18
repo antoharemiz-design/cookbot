@@ -112,10 +112,17 @@ async def generate_recipe(message: types.Message):
         return
 
     await message.answer("Готовлю рецепт...")
-    recipe = await get_recipe(user_input)  # extra_context пока не передаём
+        recipe, raw_response = await get_recipe(user_input)  # теперь функция возвращает кортеж
 
     if recipe is None:
-        await message.answer("Не удалось создать рецепт. Попробуй другой запрос.")
+        debug_info = ""
+        if raw_response:
+            # Обрезаем, чтобы не превысить лимит сообщения
+            debug_info = f"\n\nОтладка (ответ модели):\n<pre>{raw_response[:1500]}</pre>"
+        await message.answer(
+            f"Не удалось создать рецепт.{debug_info}\nПопробуйте другой запрос.",
+            parse_mode="HTML"
+        )
         return
 
     # Сохраняем последний сгенерированный рецепт в БД
