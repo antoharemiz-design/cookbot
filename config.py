@@ -3,12 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.getenv("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Настройки OpenRouter
 OPENROUTER_BASE_URL = "https://api.groq.com/openai/v1"
-OPENROUTER_API_KEY = os.getenv("GROQ_API_KEY")   # можно переименовать переменную для ясности
+OPENROUTER_API_KEY = os.getenv("GROQ_API_KEY")  # можно переименовать переменную для ясности
 MODEL_NAME = "llama-3.1-8b-instant"
 # Системный промпт для поварского ИИ
 SYSTEM_PROMPT = """Ты — профессиональный шеф-повар. Пользователь напишет список продуктов, которые у него есть. Твоя задача — придумать реалистичный и вкусный рецепт.
