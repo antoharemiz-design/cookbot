@@ -8,7 +8,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Настройки OpenRouter
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-MODEL_NAME = "google/gemma-4-26b-a4b-it:free"
+MODEL_NAME = "google/gemma-2-9b-it:free"
 # Системный промпт для поварского ИИ
 SYSTEM_PROMPT = """Ты — профессиональный шеф-повар. Пользователь напишет список продуктов, которые у него есть. Твоя задача — придумать реалистичный и вкусный рецепт.
 Ответь **строго** в формате JSON без каких-либо дополнительных комментариев, без маркдауна, без обрамления в ```json.
