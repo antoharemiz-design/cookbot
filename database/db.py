@@ -76,7 +76,15 @@ async def init_db():
                 UNIQUE(user_id, achievement_key)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS fridge (
+                user_id INTEGER NOT NULL,
+                product TEXT NOT NULL,
+                UNIQUE(user_id, product)
+            )
+        """)
         await db.commit()
+        
 
 # ---------- Избранное ----------
 async def add_favorite(user_id: int, recipe: dict):
@@ -164,6 +172,22 @@ async def add_score(user_id: int, points: int):
 async def get_score(user_id: int) -> int:
     prefs = await get_user_prefs(user_id)
     return int(prefs.get("score") or 0) if prefs else 0
+
+async def add_to_fridge(user_id: int, product: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR IGNORE INTO fridge (user_id, product) VALUES (?, ?)", (user_id, product.lower()))
+        await db.commit()
+
+async def remove_from_fridge(user_id: int, product: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM fridge WHERE user_id = ? AND product = ?", (user_id, product.lower()))
+        await db.commit()
+
+async def get_fridge(user_id: int) -> list[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT product FROM fridge WHERE user_id = ?", (user_id,))
+        rows = await cur.fetchall()
+        return [r[0] for r in rows]
 
 # ---------- Подписки ----------
 async def add_subscriber(user_id: int):
