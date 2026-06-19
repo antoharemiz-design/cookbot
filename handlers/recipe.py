@@ -1,5 +1,7 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.ai import get_recipe
@@ -102,10 +104,13 @@ async def delete_favorite(callback: types.CallbackQuery):
         await callback.answer("Ошибка удаления.", show_alert=True)
 
 # Обработка текстовых запросов (генерация рецепта)
-@router.message(lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
-    "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
-    "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
-])
+@router.message(
+    StateFilter(None),  # только если нет активного состояния
+    lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
+        "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
+        "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
+    ]
+)
 async def generate_recipe(message: types.Message):
     user_input = message.text.strip()
     if len(user_input) < 3:
