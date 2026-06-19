@@ -10,7 +10,6 @@ router = Router()
 class NameState(StatesGroup):
     waiting_for_name = State()
 
-# Главное меню
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -21,7 +20,6 @@ main_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ---------- Инлайн-клавиатуры (callback_data на латинице) ----------
 def diet_inline():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Без ограничений", callback_data="set_diet:none")],
@@ -93,19 +91,7 @@ async def process_name(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(f"Отлично, {name}! Выбери диету:", reply_markup=diet_inline())
 
-# ---------- Отладочный обработчик (покажет вообще все коллбеки) ----------
-@router.callback_query()
-async def debug_any_callback(callback: types.CallbackQuery):
-    await callback.answer(f"DEBUG: {callback.data}", show_alert=True)
-    # Здесь мы не прерываем, позволяем следующим обработчикам тоже сработать,
-    # но aiogram по умолчанию останавливается на первом подходящем.
-    # Поэтому этот обработчик перехватит все коллбеки. Мы временно ставим его в конец,
-    # но нужно, чтобы он не перехватывал целевые, поэтому я сделаю его с более низким приоритетом.
-    # Лучше просто убрать, когда найдём проблему. Пока можно оставить и посмотреть, какие данные приходят.
-    # Если нажать на кнопку уровня, мы увидим "DEBUG: set_skill:beginner" в alert.
-    pass
-
-# ---------- Обработчики с конкретными фильтрами ----------
+# ---------- Инлайн-обработчики ----------
 @router.callback_query(F.data.startswith("set_diet:"))
 async def set_diet(callback: types.CallbackQuery):
     diet_map = {
@@ -151,7 +137,6 @@ async def set_skill(callback: types.CallbackQuery):
     skill = skill_map.get(key, key)
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень: {skill}")
-    # Редактируем сообщение, убираем кнопки и выводим финальное подтверждение
     await callback.message.edit_text(
         "✅ Профиль сохранён! Теперь рецепты будут персональными.",
         reply_markup=None
