@@ -1,5 +1,5 @@
 from aiogram import Router, types, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.ai import get_recipe
@@ -100,19 +100,16 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генератор рецептов – только если НЕТ активного FSM (профиль не заполняется)
+# Генератор рецептов – сработает только если нет активного FSM
 @router.message(
-    StateFilter(None),
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
         "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню",
-        # Исключаем все возможные кнопки профиля, чтобы точно не перехватывать
         "Без ограничений", "Кето", "Веган", "Вегетарианская", "Низкоуглеводная",
         "Новичок", "Средний", "Продвинутый", "Пропустить"
     ]
 )
 async def generate_recipe(message: types.Message):
-    print(f"DEBUG: generate_recipe called with text={message.text}")
     user_input = message.text.strip()
     if len(user_input) < 3:
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
