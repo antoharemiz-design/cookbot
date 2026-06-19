@@ -31,7 +31,7 @@ async def main():
     await site.start()
     logging.info(f"Health server started on port {port}")
 
-    # Запуск планировщика
+    # Планировщик
     scheduler.add_job(send_daily_recipe, 'cron', hour=10, minute=0, args=[bot])
     scheduler.start()
 
