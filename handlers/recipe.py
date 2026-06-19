@@ -7,16 +7,17 @@ from database.db import (
     add_favorite, get_favorites, remove_favorite,
     set_last_recipe, get_last_recipe, get_user_prefs, update_user_prefs,
     add_subscriber, remove_subscriber, get_all_subscribers, add_rating,
-    add_cook_log, get_cook_log, get_or_create_quest, complete_quest,
-    check_and_grant_achievements, get_user_achievements, get_cooked_count,
-    grant_achievement, ACHIEVEMENTS
+    add_cook_log, get_cook_log, get_or_create_quest, complete_quest, is_quest_completed_today,
+    check_and_grant_achievements, get_user_achievements, get_cooked_count, get_score, add_score,
+    grant_achievement, ACHIEVEMENTS, QUEST_TYPES
 )
 import logging
+import re
 
 router = Router()
 logging.basicConfig(level=logging.INFO)
 
-# Главное меню (добавлены Дневник и Статистика)
+# Главное меню
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт"), KeyboardButton(text="⭐ Мои избранные")],
@@ -28,6 +29,68 @@ main_kb = ReplyKeyboardMarkup(
     input_field_placeholder="Что хотите приготовить?"
 )
 
+# ---------- Вспомогательные функции ----------
+def format_recipe(recipe: dict) -> str:
+    text = (
+        f"🍽 <b>{recipe.get('title', 'Блюдо')}</b>\n"
+        f"⏱ Время: {recipe.get('cooking_time', 'не указано')}\n"
+        f"📊 Сложность: {recipe.get('difficulty', 'не указана')}\n\n"
+        f"<b>Ингредиенты:</b>\n" + "\n".join(f"• {ing}" for ing in recipe.get('ingredients', [])) + "\n\n"
+        f"<b>Приготовление:</b>\n" + "\n".join(f"{i+1}. {step}" for i, step in enumerate(recipe.get('steps', [])))
+    )
+    if recipe.get('tip'):
+        text += f"\n\n💡 <i>Совет: {recipe['tip']}</i>"
+    return text
+
+def match_quest(recipe: dict, quest_type: str) -> bool:
+    """Проверяет, соответствует ли рецепт условиям квеста."""
+    title = recipe.get("title", "").lower()
+    ingredients = [ing.lower() for ing in recipe.get("ingredients", [])]
+    steps = " ".join(recipe.get("steps", [])).lower()
+    cooking_time_str = recipe.get("cooking_time", "").lower()
+    # Извлекаем число минут из строки
+    minutes = 999
+    match = re.search(r'(\d+)\s*мин', cooking_time_str)
+    if match:
+        minutes = int(match.group(1))
+    # Также парсим просто числа
+    if minutes == 999:
+        numbers = re.findall(r'\d+', cooking_time_str)
+        if numbers:
+            minutes = min(map(int, numbers))
+
+    if quest_type == "vegan":
+        forbidden = ["мясо", "курица", "свинина", "говядина", "рыба", "яйцо", "яйца",
+                     "молоко", "сливки", "сыр", "сметана", "масло сливочное", "креветки", "морепродукты"]
+        for ing in ingredients:
+            for f in forbidden:
+                if f in ing:
+                    return False
+        # Проверяем шаги на наличие запретных слов (но обычно достаточно ингредиентов)
+        return True
+    elif quest_type == "three_ingredients":
+        return len(recipe.get("ingredients", [])) == 3
+    elif quest_type == "no_meat":
+        forbidden = ["мясо", "курица", "свинина", "говядина", "рыба", "креветки", "морепродукты"]
+        for ing in ingredients:
+            for f in forbidden:
+                if f in ing:
+                    return False
+        return True
+    elif quest_type == "dessert":
+        dessert_keywords = ["сахар", "мёд", "шоколад", "фрукты", "десерт", "сладкий", "крем", "варенье", "мороженое"]
+        return any(kw in title for kw in dessert_keywords) or any(kw in " ".join(ingredients) for kw in dessert_keywords)
+    elif quest_type == "red_product":
+        reds = ["помидор", "перец красный", "клубника", "свёкла", "красная рыба", "красный", "томат"]
+        return any(any(r in ing for r in reds) for ing in ingredients)
+    elif quest_type == "fast":
+        return minutes <= 20
+    elif quest_type == "new_cuisine":
+        cuisines = ["итальянск", "японск", "мексиканск", "китайск", "французск", "тайск", "индийск"]
+        return any(c in title for c in cuisines)
+    return False
+
+# ---------- Команды и кнопки ----------
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     prefs = await get_user_prefs(message.from_user.id)
@@ -43,7 +106,7 @@ async def cmd_start(message: types.Message):
         "• Учитывать диету, аллергии и предпочтения\n"
         "• Сохранять любимые рецепты\n"
         "• Присылать блюдо дня\n"
-        "• Давать ежедневные задания и награды 🏆\n\n"
+        "• Давать ежедневные задания с наградами 🏆\n\n"
         "Чтобы я знал твои вкусы, нажми <b>⚙️ Настройки</b> или просто напиши, что есть в холодильнике!\n"
         "<i>Например: курица, лук, сметана, гречка</i>",
         parse_mode="HTML",
@@ -105,7 +168,7 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генератор рецептов
+# Генератор рецептов (основная логика с очками и квестами)
 @router.message(
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "📖 Дневник", "🏆 Статистика",
@@ -136,14 +199,36 @@ async def generate_recipe(message: types.Message):
         else:
             await message.answer("😔 Не удалось создать рецепт. Попробуйте изменить запрос.")
         return
-    # Сохраняем в last_recipe, cook_log
+
+    # Сохраняем рецепт
     await set_last_recipe(message.from_user.id, recipe)
     await add_cook_log(message.from_user.id, recipe)
-    # Проверяем квест
+
+    # Базовые очки за приготовление (10)
+    await add_score(message.from_user.id, 10)
+
+    # Проверяем квест дня
     quest = await get_or_create_quest(message.from_user.id)
-    quest_completed_today = quest["completed"]
-    # Проверяем достижения
-    new_ach = await check_and_grant_achievements(message.from_user.id)
+    quest_completed = quest["completed"]
+    bonus_earned = False
+    if not quest_completed and match_quest(recipe, quest["type"]):
+        await complete_quest(message.from_user.id)
+        await add_score(message.from_user.id, 50)  # бонус за квест
+        bonus_earned = True
+
+    # Проверяем достижения (в т.ч. быстрый шеф)
+    if not await has_achievement(message.from_user.id, "fast_chef"):
+        cooking_time = recipe.get("cooking_time", "")
+        match = re.search(r'(\d+)\s*мин', cooking_time.lower())
+        if match:
+            mins = int(match.group(1))
+            if mins <= 15:
+                await grant_achievement(message.from_user.id, "fast_chef")
+                bonus_earned = True  # можно отдельно уведомить, но мы пока просто проверим
+
+    new_achievements = await check_and_grant_achievements(message.from_user.id)
+
+    # Формируем ответ
     response_text = format_recipe(recipe)
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -155,9 +240,20 @@ async def generate_recipe(message: types.Message):
         InlineKeyboardButton(text="👎", callback_data=f"rate:{recipe['title']}:0")
     )
     await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
-    # Если квест не выполнен, напомним
-    if not quest_completed_today:
-        await message.answer(f"📌 <b>Квест дня:</b> {quest['description']}\nНажми <b>🗡 Квест дня</b> после выполнения, чтобы получить баллы!", parse_mode="HTML")
+
+    # Уведомления о результатах
+    notifications = []
+    if bonus_earned:
+        notifications.append("🎉 <b>Квест дня выполнен! +50 очков.</b>")
+    if new_achievements:
+        for ach in new_achievements:
+            notifications.append(f"🏆 Новое достижение: {ach['icon']} {ach['name']} – {ach['desc']}")
+    if not quest_completed and not bonus_earned:
+        # Напоминаем о текущем квесте
+        notifications.append(f"📌 <b>Квест дня:</b> {quest['description']}")
+
+    if notifications:
+        await message.answer("\n".join(notifications), parse_mode="HTML")
 
 @router.callback_query(F.data == "save_last")
 async def save_last_recipe(callback: types.CallbackQuery):
@@ -196,16 +292,23 @@ async def show_diary(message: types.Message):
 @router.message(F.text == "🏆 Статистика")
 async def show_stats(message: types.Message):
     count = await get_cooked_count(message.from_user.id)
+    score = await get_score(message.from_user.id)
     achievements = await get_user_achievements(message.from_user.id)
-    ach_text = "\n".join([f"{a['icon']} {a['name']} – {a['desc']}" for a in achievements]) if achievements else "Нет достижений"
+    completed_quests = await get_completed_quests_count(message.from_user.id)
     level = "Новичок"
-    if count >= 10:
+    if count >= 20:
+        level = "Мастер-шеф"
+    elif count >= 10:
         level = "Шеф"
     elif count >= 5:
         level = "Умелец"
+
+    ach_text = "\n".join([f"{a['icon']} {a['name']} – {a['desc']}" for a in achievements]) if achievements else "Нет достижений"
     text = (
         f"🏆 <b>Ваш уровень:</b> {level}\n"
-        f"🍳 Приготовлено блюд: <b>{count}</b>\n\n"
+        f"⭐ Очки: <b>{score}</b>\n"
+        f"🍳 Приготовлено блюд: <b>{count}</b>\n"
+        f"⚔️ Выполнено квестов: <b>{completed_quests}</b>\n\n"
         f"<b>Достижения:</b>\n{ach_text}"
     )
     await message.answer(text, parse_mode="HTML")
@@ -218,23 +321,9 @@ async def quest_command(message: types.Message):
     else:
         await message.answer(
             f"🗡 <b>Квест дня:</b> {quest['description']}\n\n"
-            "Как только приготовите подходящее блюдо, нажмите кнопку ниже.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Я выполнил!", callback_data="complete_quest")]
-            ])
+            f"Приготовьте блюдо, соответствующее условию, и получите <b>50 очков</b>!",
+            parse_mode="HTML"
         )
-
-@router.callback_query(F.data == "complete_quest")
-async def complete_quest_callback(callback: types.CallbackQuery):
-    quest = await get_or_create_quest(callback.from_user.id)
-    if quest["completed"]:
-        await callback.answer("Квест уже выполнен.", show_alert=True)
-        return
-    await complete_quest(callback.from_user.id)
-    # Начисляем бонусные баллы (просто отмечаем)
-    await callback.answer("Квест выполнен! +50 очков!", show_alert=True)
-    await callback.message.answer("🎉 Отлично! Вы заработали бонусные очки. Завтра ждите новый квест.")
 
 @router.message(F.text == "🔔 Блюдо дня")
 async def toggle_daily(message: types.Message):
@@ -358,15 +447,3 @@ async def set_skill(callback: types.CallbackQuery):
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
-
-def format_recipe(recipe: dict) -> str:
-    text = (
-        f"🍽 <b>{recipe.get('title', 'Блюдо')}</b>\n"
-        f"⏱ Время: {recipe.get('cooking_time', 'не указано')}\n"
-        f"📊 Сложность: {recipe.get('difficulty', 'не указана')}\n\n"
-        f"<b>Ингредиенты:</b>\n" + "\n".join(f"• {ing}" for ing in recipe.get('ingredients', [])) + "\n\n"
-        f"<b>Приготовление:</b>\n" + "\n".join(f"{i+1}. {step}" for i, step in enumerate(recipe.get('steps', [])))
-    )
-    if recipe.get('tip'):
-        text += f"\n\n💡 <i>Совет: {recipe['tip']}</i>"
-    return text
