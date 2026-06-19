@@ -102,7 +102,6 @@ async def delete_favorite(callback: types.CallbackQuery):
 
 # Генерация рецепта – только если нет активного FSM (например, ввод имени)
 @router.message(
-    StateFilter(None),
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
         "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
