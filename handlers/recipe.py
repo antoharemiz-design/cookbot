@@ -101,7 +101,7 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генерация рецепта – сработает только если нет активного состояния (профиль не заполняется)
+# Генерация рецепта – только если НЕТ активного FSM и текст не из меню/профиля
 @router.message(
     StateFilter(None),
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
