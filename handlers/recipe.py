@@ -94,7 +94,6 @@ def match_quest(recipe: dict, quest_type: str) -> bool:
     return False
 
 async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[dict | None, str | None]:
-    """Генерирует рецепт на основе списка продуктов, учитывая профиль."""
     prefs = await get_user_prefs(user_id)
     extra = ""
     if prefs:
@@ -210,7 +209,7 @@ async def generate_recipe(message: types.Message):
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
         return
 
-    # Проверка, не запрос ли "из холодильника"
+    # Запрос из холодильника
     if user_input.lower() in ["из холодильника", "что приготовить из холодильника"]:
         products = await get_fridge(message.from_user.id)
         if not products:
@@ -240,12 +239,10 @@ async def generate_recipe(message: types.Message):
             await message.answer("😔 Не удалось создать рецепт. Попробуйте изменить запрос.")
         return
 
-    # Сохраняем рецепт
     await set_last_recipe(message.from_user.id, recipe)
     await add_cook_log(message.from_user.id, recipe)
     await add_score(message.from_user.id, 10)
 
-    # Квест дня
     quest = await get_or_create_quest(message.from_user.id)
     bonus_earned = False
     if not quest["completed"] and match_quest(recipe, quest["type"]):
@@ -253,7 +250,6 @@ async def generate_recipe(message: types.Message):
         await add_score(message.from_user.id, 50)
         bonus_earned = True
 
-    # Быстрый шеф
     if not await has_achievement(message.from_user.id, "fast_chef"):
         cooking_time = recipe.get("cooking_time", "")
         match = re.search(r'(\d+)\s*мин', cooking_time.lower())
@@ -332,7 +328,12 @@ async def fridge_menu(message: types.Message):
 
 @router.callback_query(F.data == "fridge_add")
 async def fridge_add_prompt(callback: types.CallbackQuery):
-    await callback.message.answer("Напишите название продукта, который хотите добавить (например: помидор).")
+    # Просим ответить на это сообщение
+    await callback.message.answer(
+        "Напишите название продукта, который хотите добавить (например: помидор).\n"
+        "<i>Для добавления ответьте на это сообщение.</i>",
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 @router.callback_query(F.data == "fridge_remove")
@@ -364,18 +365,20 @@ async def fridge_delete(callback: types.CallbackQuery):
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
-# Обработчик добавления продукта (просто текст после нажатия "Добавить")
-# Сделаем упрощённо: любое сообщение после команды "добавить" будет считаться продуктом,
-# но чтобы не было конфликтов, ограничим контекст через состояние? Пока используем отдельную команду.
-@router.message(lambda msg: msg.text and msg.text.startswith("добавить в холодильник"))
-async def add_to_fridge_handler(message: types.Message):
-    parts = message.text.split(" ", 2)
-    if len(parts) < 3:
-        await message.answer("Укажите продукт: добавьте в холодильник помидор")
-        return
-    product = parts[2].strip().lower()
-    await add_to_fridge(message.from_user.id, product)
-    await message.answer(f"✅ {product} добавлен в холодильник!")
+# Хендлер для добавления продукта: только ответ на сообщение с запросом добавления
+@router.message(F.reply_to_message)
+async def handle_reply_for_fridge(message: types.Message):
+    # Проверяем, что сообщение, на которое отвечают, содержит приглашение добавить продукт
+    if message.reply_to_message.text and "Напишите название продукта" in message.reply_to_message.text:
+        product = message.text.strip().lower()
+        if not product:
+            await message.answer("Вы не ввели продукт. Попробуйте ещё раз.")
+            return
+        await add_to_fridge(message.from_user.id, product)
+        await message.answer(f"✅ {product} добавлен в холодильник!")
+    # Если ответ не на то сообщение, просто ничего не делаем (или можно передать дальше)
+    # но чтобы не мешать генератору, не будем обрабатывать другие ответы
+    # (генератор не сработает, потому что сообщение начинается с reply)
 
 # ---------- Дневник ----------
 @router.message(F.text == "📖 Дневник")
