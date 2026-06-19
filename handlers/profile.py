@@ -105,19 +105,24 @@ async def process_dislikes(message: types.Message, state: FSMContext):
     await message.answer("Какой у тебя уровень готовки?", reply_markup=skill_kb)
     await state.set_state(ProfileForm.skill)
 
-@router.message(ProfileForm.skill, F.text.in_(["Новичок", "Средний", "Продвинутый"]))
-async def process_skill(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    await update_user_prefs(
-        message.from_user.id,
-        name=data['name'],
-        diet=data['diet'],
-        allergies=data['allergies'],
-        dislikes=data['dislikes'],
-        skill=message.text
-    )
-    await state.clear()
-    await message.answer(
-        f"Отлично, {data['name']}! Твой профиль сохранён. Теперь рецепты будут подбираться с учётом твоих предпочтений.",
-        reply_markup=main_kb
-    )
+@router.message(ProfileForm.skill, F.text)
+async def process_skill_debug(message: types.Message, state: FSMContext):
+    # Отладочный вывод – потом удалим
+    await message.answer(f"DEBUG: skill state, text={message.text}")
+    if message.text in ["Новичок", "Средний", "Продвинутый"]:
+        data = await state.get_data()
+        await update_user_prefs(
+            message.from_user.id,
+            name=data['name'],
+            diet=data['diet'],
+            allergies=data['allergies'],
+            dislikes=data['dislikes'],
+            skill=message.text
+        )
+        await state.clear()
+        await message.answer(
+            f"Отлично, {data['name']}! Твой профиль сохранён. Теперь рецепты будут подбираться с учётом твоих предпочтений.",
+            reply_markup=main_kb
+        )
+    else:
+        await message.answer("Пожалуйста, выбери уровень из кнопок: Новичок, Средний, Продвинутый.")
