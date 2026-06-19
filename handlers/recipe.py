@@ -1,6 +1,10 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardButton, InlineKeyboardMarkup,
+    InlineQueryResultArticle, InputTextMessageContent
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.ai import get_recipe
 from database.db import (
@@ -9,22 +13,25 @@ from database.db import (
     add_subscriber, remove_subscriber, get_all_subscribers, add_rating,
     add_cook_log, get_cook_log, get_or_create_quest, complete_quest, is_quest_completed_today,
     check_and_grant_achievements, get_user_achievements, get_cooked_count, get_score, add_score,
-    grant_achievement, has_achievement, ACHIEVEMENTS, QUEST_TYPES, get_completed_quests_count
+    grant_achievement, has_achievement, ACHIEVEMENTS, QUEST_TYPES, get_completed_quests_count,
+    add_to_fridge, remove_from_fridge, get_fridge
 )
 import logging
 import re
+import hashlib
 
 router = Router()
 logging.basicConfig(level=logging.INFO)
 
-# Главное меню
+# ---------- Главное меню ----------
 def make_main_kb(user_id: int):
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🍳 Придумать рецепт"), KeyboardButton(text="⭐ Мои избранные")],
-            [KeyboardButton(text="📖 Дневник"), KeyboardButton(text="🏆 Статистика")],
-            [KeyboardButton(text="🔔 Блюдо дня"), KeyboardButton(text="⚙️ Настройки")],
-            [KeyboardButton(text="🗡 Квест дня"), KeyboardButton(text="ℹ️ О боте")]
+            [KeyboardButton(text="🧊 Мой холодильник"), KeyboardButton(text="📖 Дневник")],
+            [KeyboardButton(text="🏆 Статистика"), KeyboardButton(text="🔔 Блюдо дня")],
+            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🗡 Квест дня")],
+            [KeyboardButton(text="ℹ️ О боте")]
         ],
         resize_keyboard=True,
         input_field_placeholder="Что хотите приготовить?"
@@ -46,7 +53,6 @@ def format_recipe(recipe: dict) -> str:
 def match_quest(recipe: dict, quest_type: str) -> bool:
     title = recipe.get("title", "").lower()
     ingredients = [ing.lower() for ing in recipe.get("ingredients", [])]
-    steps = " ".join(recipe.get("steps", [])).lower()
     cooking_time_str = recipe.get("cooking_time", "").lower()
     minutes = 999
     match = re.search(r'(\d+)\s*мин', cooking_time_str)
@@ -87,6 +93,22 @@ def match_quest(recipe: dict, quest_type: str) -> bool:
         return any(c in title for c in cuisines)
     return False
 
+async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[dict | None, str | None]:
+    """Генерирует рецепт на основе списка продуктов, учитывая профиль."""
+    prefs = await get_user_prefs(user_id)
+    extra = ""
+    if prefs:
+        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
+            extra += f"Диета: {prefs['diet']}. "
+        if prefs.get("allergies") and prefs["allergies"] != "Нет":
+            extra += f"Аллергии: {prefs['allergies']}. "
+        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
+            extra += f"Не любит: {prefs['dislikes']}. "
+        if prefs.get("skill"):
+            extra += f"Уровень готовки: {prefs['skill']}. "
+    user_input = ", ".join(products)
+    return await get_recipe(user_input, extra_context=extra)
+
 # ---------- Команды и кнопки ----------
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -109,7 +131,8 @@ async def cmd_start(message: types.Message):
         "• Учитывать диету, аллергии и предпочтения\n"
         "• Сохранять любимые рецепты\n"
         "• Присылать блюдо дня\n"
-        "• Давать ежедневные задания с наградами 🏆"
+        "• Давать ежедневные задания с наградами 🏆\n"
+        "• Вести твой виртуальный холодильник 🧊"
         f"{quest_text}",
         parse_mode="HTML",
         reply_markup=make_main_kb(message.from_user.id)
@@ -177,8 +200,8 @@ async def delete_favorite(callback: types.CallbackQuery):
 # Генератор рецептов
 @router.message(
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
-        "🍳 Придумать рецепт", "⭐ Мои избранные", "📖 Дневник", "🏆 Статистика",
-        "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня", "ℹ️ О боте"
+        "🍳 Придумать рецепт", "⭐ Мои избранные", "🧊 Мой холодильник", "📖 Дневник",
+        "🏆 Статистика", "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня", "ℹ️ О боте"
     ]
 )
 async def generate_recipe(message: types.Message):
@@ -186,19 +209,30 @@ async def generate_recipe(message: types.Message):
     if len(user_input) < 3:
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
         return
-    await message.answer("👨‍🍳 Готовлю рецепт...")
-    prefs = await get_user_prefs(message.from_user.id)
-    extra = ""
-    if prefs:
-        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
-            extra += f"Диета: {prefs['diet']}. "
-        if prefs.get("allergies") and prefs["allergies"] != "Нет":
-            extra += f"Аллергии: {prefs['allergies']}. "
-        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
-            extra += f"Не любит: {prefs['dislikes']}. "
-        if prefs.get("skill"):
-            extra += f"Уровень готовки: {prefs['skill']}. "
-    recipe, raw_response = await get_recipe(user_input, extra_context=extra)
+
+    # Проверка, не запрос ли "из холодильника"
+    if user_input.lower() in ["из холодильника", "что приготовить из холодильника"]:
+        products = await get_fridge(message.from_user.id)
+        if not products:
+            await message.answer("Ваш холодильник пуст. Добавьте продукты через меню «🧊 Мой холодильник».")
+            return
+        await message.answer(f"👨‍🍳 Готовлю рецепт из: {', '.join(products)}...")
+        recipe, raw_response = await generate_recipe_from_list(message.from_user.id, products)
+    else:
+        await message.answer("👨‍🍳 Готовлю рецепт...")
+        prefs = await get_user_prefs(message.from_user.id)
+        extra = ""
+        if prefs:
+            if prefs.get("diet") and prefs["diet"] != "Без ограничений":
+                extra += f"Диета: {prefs['diet']}. "
+            if prefs.get("allergies") and prefs["allergies"] != "Нет":
+                extra += f"Аллергии: {prefs['allergies']}. "
+            if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
+                extra += f"Не любит: {prefs['dislikes']}. "
+            if prefs.get("skill"):
+                extra += f"Уровень готовки: {prefs['skill']}. "
+        recipe, raw_response = await get_recipe(user_input, extra_context=extra)
+
     if recipe is None:
         if raw_response == "RATE_LIMIT":
             await message.answer("⏳ Слишком много запросов. Попробуйте через минуту.")
@@ -209,8 +243,6 @@ async def generate_recipe(message: types.Message):
     # Сохраняем рецепт
     await set_last_recipe(message.from_user.id, recipe)
     await add_cook_log(message.from_user.id, recipe)
-
-    # Базовые очки
     await add_score(message.from_user.id, 10)
 
     # Квест дня
@@ -221,7 +253,7 @@ async def generate_recipe(message: types.Message):
         await add_score(message.from_user.id, 50)
         bonus_earned = True
 
-    # Проверка быстрого шефа
+    # Быстрый шеф
     if not await has_achievement(message.from_user.id, "fast_chef"):
         cooking_time = recipe.get("cooking_time", "")
         match = re.search(r'(\d+)\s*мин', cooking_time.lower())
@@ -238,14 +270,12 @@ async def generate_recipe(message: types.Message):
         InlineKeyboardButton(text="⭐ В избранное", callback_data="save_last"),
         InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=recipe.get("title", ""))
     )
-    # Безопасные кнопки оценок (без названия рецепта)
     builder.row(
         InlineKeyboardButton(text="👍", callback_data="rate:1"),
         InlineKeyboardButton(text="👎", callback_data="rate:0")
     )
     await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
 
-    # Уведомления
     notifications = []
     if bonus_earned:
         notifications.append("🎉 <b>Квест дня выполнен! +50 очков.</b>")
@@ -270,12 +300,10 @@ async def save_last_recipe(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("rate:"))
 async def handle_rate(callback: types.CallbackQuery):
-    # Получаем рецепт из last_recipe
     recipe = await get_last_recipe(callback.from_user.id)
     if recipe is None:
         await callback.answer("Рецепт не найден.", show_alert=True)
         return
-    # Извлекаем оценку (1 или 0)
     rating_str = callback.data.split(":")[1]
     if rating_str not in ("1", "0"):
         await callback.answer()
@@ -287,6 +315,69 @@ async def handle_rate(callback: types.CallbackQuery):
     await callback.answer(f"Спасибо за оценку! {emoji}", show_alert=False)
     await callback.message.edit_reply_markup(reply_markup=None)
 
+# ---------- Холодильник ----------
+@router.message(F.text == "🧊 Мой холодильник")
+async def fridge_menu(message: types.Message):
+    products = await get_fridge(message.from_user.id)
+    if products:
+        text = "<b>Ваш холодильник:</b>\n" + "\n".join(f"• {p}" for p in products)
+    else:
+        text = "Ваш холодильник пуст. Добавьте продукты с помощью кнопки ниже."
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="fridge_add"),
+        InlineKeyboardButton(text="❌ Удалить", callback_data="fridge_remove")
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "fridge_add")
+async def fridge_add_prompt(callback: types.CallbackQuery):
+    await callback.message.answer("Напишите название продукта, который хотите добавить (например: помидор).")
+    await callback.answer()
+
+@router.callback_query(F.data == "fridge_remove")
+async def fridge_remove_prompt(callback: types.CallbackQuery):
+    products = await get_fridge(callback.from_user.id)
+    if not products:
+        await callback.answer("Холодильник пуст.", show_alert=True)
+        return
+    builder = InlineKeyboardBuilder()
+    for p in products:
+        builder.row(InlineKeyboardButton(text=f"❌ {p}", callback_data=f"fridge_del:{p}"))
+    await callback.message.answer("Выберите продукт для удаления:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("fridge_del:"))
+async def fridge_delete(callback: types.CallbackQuery):
+    product = callback.data.split(":", 1)[1]
+    await remove_from_fridge(callback.from_user.id, product)
+    await callback.answer(f"Удалено: {product}")
+    products = await get_fridge(callback.from_user.id)
+    if products:
+        text = "<b>Ваш холодильник:</b>\n" + "\n".join(f"• {p}" for p in products)
+    else:
+        text = "Холодильник пуст."
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="fridge_add"),
+        InlineKeyboardButton(text="❌ Удалить", callback_data="fridge_remove")
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+# Обработчик добавления продукта (просто текст после нажатия "Добавить")
+# Сделаем упрощённо: любое сообщение после команды "добавить" будет считаться продуктом,
+# но чтобы не было конфликтов, ограничим контекст через состояние? Пока используем отдельную команду.
+@router.message(lambda msg: msg.text and msg.text.startswith("добавить в холодильник"))
+async def add_to_fridge_handler(message: types.Message):
+    parts = message.text.split(" ", 2)
+    if len(parts) < 3:
+        await message.answer("Укажите продукт: добавьте в холодильник помидор")
+        return
+    product = parts[2].strip().lower()
+    await add_to_fridge(message.from_user.id, product)
+    await message.answer(f"✅ {product} добавлен в холодильник!")
+
+# ---------- Дневник ----------
 @router.message(F.text == "📖 Дневник")
 async def show_diary(message: types.Message):
     log = await get_cook_log(message.from_user.id, limit=5)
@@ -299,6 +390,7 @@ async def show_diary(message: types.Message):
         text += f"• {title}\n"
     await message.answer(text, parse_mode="HTML")
 
+# ---------- Статистика ----------
 @router.message(F.text == "🏆 Статистика")
 async def show_stats(message: types.Message):
     count = await get_cooked_count(message.from_user.id)
@@ -332,6 +424,7 @@ async def show_stats(message: types.Message):
     )
     await message.answer(text, parse_mode="HTML")
 
+# ---------- Квест дня ----------
 @router.message(F.text == "🗡 Квест дня")
 async def quest_command(message: types.Message):
     quest = await get_or_create_quest(message.from_user.id)
@@ -345,6 +438,7 @@ async def quest_command(message: types.Message):
             parse_mode="HTML"
         )
 
+# ---------- Блюдо дня ----------
 @router.message(F.text == "🔔 Блюдо дня")
 async def toggle_daily(message: types.Message):
     subs = await get_all_subscribers()
@@ -355,10 +449,12 @@ async def toggle_daily(message: types.Message):
         await add_subscriber(message.from_user.id)
         await message.answer("🔔 Теперь вы будете получать блюдо дня в 10:00 UTC! 🍽️")
 
+# ---------- Настройки ----------
 @router.message(F.text == "⚙️ Настройки")
 async def settings_button(message: types.Message):
     await set_prefs_start(message)
 
+# ---------- О боте ----------
 @router.message(F.text == "ℹ️ О боте")
 async def about_bot(message: types.Message):
     await message.answer(
@@ -467,3 +563,35 @@ async def set_skill(callback: types.CallbackQuery):
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
+
+# ---------- Инлайн-режим ----------
+@router.inline_query()
+async def inline_recipe(inline_query: types.InlineQuery):
+    query = inline_query.query.strip()
+    if not query or len(query) < 3:
+        return
+
+    recipe, _ = await get_recipe(query)
+    if recipe is None:
+        return
+
+    title = recipe.get("title", "Рецепт")
+    time = recipe.get("cooking_time", "? мин")
+    description = f"⏱ {time} | {recipe.get('difficulty', '')}"
+    ingredients = "\n".join(f"• {ing}" for ing in recipe.get("ingredients", []))
+    steps = "\n".join(f"{i+1}. {step}" for i, step in enumerate(recipe.get("steps", [])))
+    full_text = f"🍽 <b>{title}</b>\n⏱ {time}\n\n<b>Ингредиенты:</b>\n{ingredients}\n\n<b>Приготовление:</b>\n{steps}"
+    if recipe.get("tip"):
+        full_text += f"\n\n💡 {recipe['tip']}"
+
+    input_content = InputTextMessageContent(full_text, parse_mode="HTML")
+    result_id = hashlib.md5(query.encode()).hexdigest()
+
+    result = InlineQueryResultArticle(
+        id=result_id,
+        title=title,
+        description=description,
+        input_message_content=input_content
+    )
+
+    await inline_query.answer([result], cache_time=10)
