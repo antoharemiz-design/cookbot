@@ -1,60 +1,65 @@
 from aiogram import Router, types, F
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.db import update_user_prefs, get_user_prefs
 
 router = Router()
 
-class ProfileForm(StatesGroup):
-    name = State()
-    diet = State()
-    allergies = State()
-    dislikes = State()
-    skill = State()
-
-diet_kb = ReplyKeyboardMarkup(
+# Обычное меню
+main_kb = types.ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Без ограничений")],
-        [KeyboardButton(text="Кето")],
-        [KeyboardButton(text="Веган")],
-        [KeyboardButton(text="Вегетарианская")],
-        [KeyboardButton(text="Низкоуглеводная")]
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=True
-)
-
-skill_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Новичок")],
-        [KeyboardButton(text="Средний")],
-        [KeyboardButton(text="Продвинутый")]
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=True
-)
-
-skip_kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Пропустить")]],
-    resize_keyboard=True,
-    one_time_keyboard=True
-)
-
-main_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🍳 Придумать рецепт")],
-        [KeyboardButton(text="⭐ Мои избранные")],
-        [KeyboardButton(text="🔔 Блюдо дня"), KeyboardButton(text="📅 Меню на неделю")],
-        [KeyboardButton(text="⚙️ Профиль"), KeyboardButton(text="❓ Помощь")]
+        [types.KeyboardButton(text="🍳 Придумать рецепт")],
+        [types.KeyboardButton(text="⭐ Мои избранные")],
+        [types.KeyboardButton(text="🔔 Блюдо дня"), types.KeyboardButton(text="📅 Меню на неделю")],
+        [types.KeyboardButton(text="⚙️ Профиль"), types.KeyboardButton(text="❓ Помощь")]
     ],
     resize_keyboard=True
 )
 
+# ---------- Инлайн-клавиатуры ----------
+def diet_inline():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Без ограничений", callback_data="set_diet:Без ограничений")],
+        [InlineKeyboardButton(text="Кето", callback_data="set_diet:Кето")],
+        [InlineKeyboardButton(text="Веган", callback_data="set_diet:Веган")],
+        [InlineKeyboardButton(text="Вегетарианская", callback_data="set_diet:Вегетарианская")],
+        [InlineKeyboardButton(text="Низкоуглеводная", callback_data="set_diet:Низкоуглеводная")]
+    ])
+
+def skill_inline():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Новичок", callback_data="set_skill:Новичок")],
+        [InlineKeyboardButton(text="Средний", callback_data="set_skill:Средний")],
+        [InlineKeyboardButton(text="Продвинутый", callback_data="set_skill:Продвинутый")]
+    ])
+
+def allergies_inline():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Нет", callback_data="set_allergies:Нет")],
+        [InlineKeyboardButton(text="Орехи", callback_data="set_allergies:Орехи")],
+        [InlineKeyboardButton(text="Молочка", callback_data="set_allergies:Молочка")],
+        [InlineKeyboardButton(text="Глютен", callback_data="set_allergies:Глютен")],
+        [InlineKeyboardButton(text="Морепродукты", callback_data="set_allergies:Морепродукты")]
+    ])
+
+def dislikes_inline():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Нет", callback_data="set_dislikes:Нет")],
+        [InlineKeyboardButton(text="Лук", callback_data="set_dislikes:Лук")],
+        [InlineKeyboardButton(text="Рыба", callback_data="set_dislikes:Рыба")],
+        [InlineKeyboardButton(text="Брокколи", callback_data="set_dislikes:Брокколи")],
+        [InlineKeyboardButton(text="Чеснок", callback_data="set_dislikes:Чеснок")]
+    ])
+
+def finalize_inline():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Сохранить", callback_data="save_profile")]
+    ])
+
+# ---------- Команды и кнопки ----------
 @router.message(Command("profile"))
 @router.message(F.text == "⚙️ Профиль")
-async def start_profile(message: types.Message, state: FSMContext):
+async def profile_start(message: types.Message):
     prefs = await get_user_prefs(message.from_user.id)
     if prefs and prefs.get("name"):
         await message.answer(
@@ -64,65 +69,90 @@ async def start_profile(message: types.Message, state: FSMContext):
             f"⚠️ Аллергии: {prefs.get('allergies', '-')}\n"
             f"🚫 Не любишь: {prefs.get('dislikes', '-')}\n"
             f"👨‍🍳 Уровень: {prefs.get('skill', '-')}\n\n"
-            "Чтобы изменить, нажми /profile ещё раз.",
-            reply_markup=main_kb
+            "Чтобы изменить, нажми кнопку ниже.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✏️ Изменить имя", callback_data="edit_name")],
+                [InlineKeyboardButton(text="🥗 Изменить диету", callback_data="edit_diet")],
+                [InlineKeyboardButton(text="⚠️ Аллергии", callback_data="edit_allergies")],
+                [InlineKeyboardButton(text="🚫 Нелюбимые", callback_data="edit_dislikes")],
+                [InlineKeyboardButton(text="👨‍🍳 Уровень", callback_data="edit_skill")]
+            ])
         )
         return
 
-    await message.answer("Давай познакомимся! Как тебя зовут?")
-    await state.set_state(ProfileForm.name)
+    # Новый пользователь: просим имя
+    await message.answer("Привет! Давай заполним твой профиль.\nНапиши своё имя:")
+    # Временно сохраним состояние в user_prefs с пустым именем, чтобы знать, что ждём имя
+    await update_user_prefs(message.from_user.id, name="в ожидании...")
 
-@router.message(ProfileForm.name, F.text)
-async def process_name(message: types.Message, state: FSMContext):
-    await state.update_data(name=message.text)
-    await message.answer("Какая у тебя диета или предпочтения по питанию?", reply_markup=diet_kb)
-    await state.set_state(ProfileForm.diet)
-
-@router.message(ProfileForm.diet, F.text)
-async def process_diet(message: types.Message, state: FSMContext):
-    if message.text not in ["Без ограничений", "Кето", "Веган", "Вегетарианская", "Низкоуглеводная"]:
-        await message.answer("Пожалуйста, выбери из вариантов или нажми 'Пропустить'.", reply_markup=diet_kb)
-        return
-    await state.update_data(diet=message.text)
-    await message.answer("Есть ли у тебя аллергии? (например: орехи, молочка, глютен). Если нет, напиши 'нет'.", reply_markup=skip_kb)
-    await state.set_state(ProfileForm.allergies)
-
-@router.message(ProfileForm.allergies, F.text)
-async def process_allergies(message: types.Message, state: FSMContext):
-    if message.text == "Пропустить":
-        await state.update_data(allergies="Нет")
+@router.message(lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
+    "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
+    "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
+])
+async def handle_name_input(message: types.Message):
+    # Проверим, ждём ли мы имя (поле name == "в ожидании...")
+    prefs = await get_user_prefs(message.from_user.id)
+    if prefs and prefs.get("name") == "в ожидании...":
+        # Сохраняем имя
+        await update_user_prefs(message.from_user.id, name=message.text.strip())
+        await message.answer(f"Отлично, {message.text.strip()}! Теперь выбери диету:", reply_markup=diet_inline())
     else:
-        await state.update_data(allergies=message.text)
-    await message.answer("Какие продукты ты не любишь? (например: лук, рыба, брокколи). Можно пропустить.", reply_markup=skip_kb)
-    await state.set_state(ProfileForm.dislikes)
+        # Если не ждём имя, значит это обычный запрос рецепта — передадим управление в recipe.py
+        # Но чтобы не усложнять, просто проигнорируем (в recipe.py всё равно стоит этот же фильтр, он обработает)
+        pass
 
-@router.message(ProfileForm.dislikes, F.text)
-async def process_dislikes(message: types.Message, state: FSMContext):
-    if message.text == "Пропустить":
-        await state.update_data(dislikes="Нет")
-    else:
-        await state.update_data(dislikes=message.text)
-    await message.answer("Какой у тебя уровень готовки?", reply_markup=skill_kb)
-    await state.set_state(ProfileForm.skill)
+# ---------- Callback-обработчики ----------
+@router.callback_query(F.data.startswith("set_diet:"))
+async def set_diet(callback: types.CallbackQuery):
+    diet = callback.data.split(":", 1)[1]
+    await update_user_prefs(callback.from_user.id, diet=diet)
+    await callback.answer(f"Диета сохранена: {diet}")
+    await callback.message.answer("Есть ли у тебя аллергии?", reply_markup=allergies_inline())
 
-@router.message(ProfileForm.skill, F.text)
-async def process_skill_debug(message: types.Message, state: FSMContext):
-    # Отладочный вывод – потом удалим
-    await message.answer(f"DEBUG: skill state, text={message.text}")
-    if message.text in ["Новичок", "Средний", "Продвинутый"]:
-        data = await state.get_data()
-        await update_user_prefs(
-            message.from_user.id,
-            name=data['name'],
-            diet=data['diet'],
-            allergies=data['allergies'],
-            dislikes=data['dislikes'],
-            skill=message.text
-        )
-        await state.clear()
-        await message.answer(
-            f"Отлично, {data['name']}! Твой профиль сохранён. Теперь рецепты будут подбираться с учётом твоих предпочтений.",
-            reply_markup=main_kb
-        )
-    else:
-        await message.answer("Пожалуйста, выбери уровень из кнопок: Новичок, Средний, Продвинутый.")
+@router.callback_query(F.data.startswith("set_allergies:"))
+async def set_allergies(callback: types.CallbackQuery):
+    value = callback.data.split(":", 1)[1]
+    await update_user_prefs(callback.from_user.id, allergies=value)
+    await callback.answer(f"Аллергии сохранены: {value}")
+    await callback.message.answer("Какие продукты не любишь?", reply_markup=dislikes_inline())
+
+@router.callback_query(F.data.startswith("set_dislikes:"))
+async def set_dislikes(callback: types.CallbackQuery):
+    value = callback.data.split(":", 1)[1]
+    await update_user_prefs(callback.from_user.id, dislikes=value)
+    await callback.answer(f"Нелюбимые сохранены: {value}")
+    await callback.message.answer("Какой у тебя уровень готовки?", reply_markup=skill_inline())
+
+@router.callback_query(F.data.startswith("set_skill:"))
+async def set_skill(callback: types.CallbackQuery):
+    skill = callback.data.split(":", 1)[1]
+    await update_user_prefs(callback.from_user.id, skill=skill)
+    await callback.answer(f"Уровень сохранён: {skill}")
+    await callback.message.answer("Профиль готов! Теперь рецепты будут персональными.", reply_markup=main_kb)
+
+# Редактирование отдельных полей
+@router.callback_query(F.data == "edit_name")
+async def edit_name(callback: types.CallbackQuery):
+    await update_user_prefs(callback.from_user.id, name="в ожидании...")
+    await callback.answer()
+    await callback.message.answer("Введи новое имя:")
+
+@router.callback_query(F.data == "edit_diet")
+async def edit_diet(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("Выбери диету:", reply_markup=diet_inline())
+
+@router.callback_query(F.data == "edit_allergies")
+async def edit_allergies(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("Выбери аллергены:", reply_markup=allergies_inline())
+
+@router.callback_query(F.data == "edit_dislikes")
+async def edit_dislikes(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("Что не любишь?", reply_markup=dislikes_inline())
+
+@router.callback_query(F.data == "edit_skill")
+async def edit_skill(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("Твой уровень:", reply_markup=skill_inline())
