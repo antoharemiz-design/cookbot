@@ -8,12 +8,10 @@ from database.db import (
     set_last_recipe, get_last_recipe, get_user_prefs, update_user_prefs,
     add_subscriber, remove_subscriber, get_all_subscribers, add_rating
 )
-import logging
 
 router = Router()
-logging.basicConfig(level=logging.INFO)
 
-# Главное меню (только рабочие кнопки)
+# Главное меню
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -209,7 +207,7 @@ async def help_cmd(message: types.Message):
         reply_markup=main_kb
     )
 
-# ---------- Быстрая настройка предпочтений ----------
+# ---------- /setprefs ----------
 @router.message(Command("setprefs"))
 async def set_prefs_start(message: types.Message):
     prefs = await get_user_prefs(message.from_user.id) or {}
@@ -266,7 +264,6 @@ async def pref_callback(callback: types.CallbackQuery):
         await callback.message.answer("Твой уровень:", reply_markup=kb)
     await callback.answer()
 
-# Обработчики установки значений
 @router.callback_query(F.data.startswith("set_diet:"))
 async def set_diet(callback: types.CallbackQuery):
     key = callback.data.split(":", 1)[1]
@@ -302,12 +299,7 @@ async def set_skill(callback: types.CallbackQuery):
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
-# ---------- ВРЕМЕННЫЙ ОТЛАДОЧНЫЙ ОБРАБОТЧИК ----------
-@router.callback_query()
-async def debug_any_callback(callback: types.CallbackQuery):
-    logging.info(f"DEBUG CALLBACK: {callback.data}")
-    await callback.answer(f"DEBUG: {callback.data}", show_alert=True)
-    
+
 def format_recipe(recipe: dict) -> str:
     text = (
         f"🍽 <b>{recipe.get('title', 'Блюдо')}</b>\n"
