@@ -7,11 +7,10 @@ from database.db import update_user_prefs, get_user_prefs
 
 router = Router()
 
-# Единственное состояние только для ввода имени
 class NameState(StatesGroup):
     waiting_for_name = State()
 
-# Главное меню (обычные кнопки)
+# Главное меню
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -22,39 +21,39 @@ main_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Инлайн-клавиатуры
+# ---------- Инлайн-клавиатуры (callback_data на латинице) ----------
 def diet_inline():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Без ограничений", callback_data="set_diet:Без ограничений")],
-        [InlineKeyboardButton(text="Кето", callback_data="set_diet:Кето")],
-        [InlineKeyboardButton(text="Веган", callback_data="set_diet:Веган")],
-        [InlineKeyboardButton(text="Вегетарианская", callback_data="set_diet:Вегетарианская")],
-        [InlineKeyboardButton(text="Низкоуглеводная", callback_data="set_diet:Низкоуглеводная")]
+        [InlineKeyboardButton(text="Без ограничений", callback_data="set_diet:none")],
+        [InlineKeyboardButton(text="Кето", callback_data="set_diet:keto")],
+        [InlineKeyboardButton(text="Веган", callback_data="set_diet:vegan")],
+        [InlineKeyboardButton(text="Вегетарианская", callback_data="set_diet:vegetarian")],
+        [InlineKeyboardButton(text="Низкоуглеводная", callback_data="set_diet:lowcarb")]
     ])
 
 def allergies_inline():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Нет", callback_data="set_allergies:Нет")],
-        [InlineKeyboardButton(text="Орехи", callback_data="set_allergies:Орехи")],
-        [InlineKeyboardButton(text="Молочка", callback_data="set_allergies:Молочка")],
-        [InlineKeyboardButton(text="Глютен", callback_data="set_allergies:Глютен")],
-        [InlineKeyboardButton(text="Морепродукты", callback_data="set_allergies:Морепродукты")]
+        [InlineKeyboardButton(text="Нет", callback_data="set_allergies:none")],
+        [InlineKeyboardButton(text="Орехи", callback_data="set_allergies:nuts")],
+        [InlineKeyboardButton(text="Молочка", callback_data="set_allergies:dairy")],
+        [InlineKeyboardButton(text="Глютен", callback_data="set_allergies:gluten")],
+        [InlineKeyboardButton(text="Морепродукты", callback_data="set_allergies:seafood")]
     ])
 
 def dislikes_inline():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Нет", callback_data="set_dislikes:Нет")],
-        [InlineKeyboardButton(text="Лук", callback_data="set_dislikes:Лук")],
-        [InlineKeyboardButton(text="Рыба", callback_data="set_dislikes:Рыба")],
-        [InlineKeyboardButton(text="Брокколи", callback_data="set_dislikes:Брокколи")],
-        [InlineKeyboardButton(text="Чеснок", callback_data="set_dislikes:Чеснок")]
+        [InlineKeyboardButton(text="Нет", callback_data="set_dislikes:none")],
+        [InlineKeyboardButton(text="Лук", callback_data="set_dislikes:onion")],
+        [InlineKeyboardButton(text="Рыба", callback_data="set_dislikes:fish")],
+        [InlineKeyboardButton(text="Брокколи", callback_data="set_dislikes:broccoli")],
+        [InlineKeyboardButton(text="Чеснок", callback_data="set_dislikes:garlic")]
     ])
 
 def skill_inline():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Новичок", callback_data="set_skill:Новичок")],
-        [InlineKeyboardButton(text="Средний", callback_data="set_skill:Средний")],
-        [InlineKeyboardButton(text="Продвинутый", callback_data="set_skill:Продвинутый")]
+        [InlineKeyboardButton(text="Новичок", callback_data="set_skill:beginner")],
+        [InlineKeyboardButton(text="Средний", callback_data="set_skill:intermediate")],
+        [InlineKeyboardButton(text="Продвинутый", callback_data="set_skill:advanced")]
     ])
 
 # ---------- Старт профиля ----------
@@ -63,7 +62,6 @@ def skill_inline():
 async def profile_start(message: types.Message, state: FSMContext):
     prefs = await get_user_prefs(message.from_user.id)
     if prefs and prefs.get("name") and prefs.get("name") != "в ожидании...":
-        # Уже заполненный профиль – показываем данные и кнопки редактирования
         await message.answer(
             f"Твой профиль:\n"
             f"👤 Имя: {prefs.get('name', '-')}\n"
@@ -82,11 +80,9 @@ async def profile_start(message: types.Message, state: FSMContext):
         )
         return
 
-    # Новый пользователь или не завершён ввод имени
     await message.answer("Давай заполним профиль! Напиши своё имя:")
     await state.set_state(NameState.waiting_for_name)
 
-# ---------- Обработка ввода имени (только когда ждём) ----------
 @router.message(NameState.waiting_for_name, F.text)
 async def process_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
@@ -95,42 +91,71 @@ async def process_name(message: types.Message, state: FSMContext):
         return
     await update_user_prefs(message.from_user.id, name=name)
     await state.clear()
-    # Отправляем новое сообщение с выбором диеты (удалим предыдущее? оставим)
     await message.answer(f"Отлично, {name}! Выбери диету:", reply_markup=diet_inline())
 
-# ---------- Инлайн-обработчики (редактируют текущее сообщение) ----------
+# ---------- Отладочный обработчик (покажет вообще все коллбеки) ----------
+@router.callback_query()
+async def debug_any_callback(callback: types.CallbackQuery):
+    await callback.answer(f"DEBUG: {callback.data}", show_alert=True)
+    # Здесь мы не прерываем, позволяем следующим обработчикам тоже сработать,
+    # но aiogram по умолчанию останавливается на первом подходящем.
+    # Поэтому этот обработчик перехватит все коллбеки. Мы временно ставим его в конец,
+    # но нужно, чтобы он не перехватывал целевые, поэтому я сделаю его с более низким приоритетом.
+    # Лучше просто убрать, когда найдём проблему. Пока можно оставить и посмотреть, какие данные приходят.
+    # Если нажать на кнопку уровня, мы увидим "DEBUG: set_skill:beginner" в alert.
+    pass
+
+# ---------- Обработчики с конкретными фильтрами ----------
 @router.callback_query(F.data.startswith("set_diet:"))
 async def set_diet(callback: types.CallbackQuery):
-    diet = callback.data.split(":", 1)[1]
+    diet_map = {
+        "none": "Без ограничений", "keto": "Кето", "vegan": "Веган",
+        "vegetarian": "Вегетарианская", "lowcarb": "Низкоуглеводная"
+    }
+    key = callback.data.split(":", 1)[1]
+    diet = diet_map.get(key, key)
     await update_user_prefs(callback.from_user.id, diet=diet)
     await callback.answer(f"Диета: {diet}")
     await callback.message.edit_text("Есть ли у тебя аллергии?", reply_markup=allergies_inline())
 
 @router.callback_query(F.data.startswith("set_allergies:"))
 async def set_allergies(callback: types.CallbackQuery):
-    value = callback.data.split(":", 1)[1]
+    allergies_map = {
+        "none": "Нет", "nuts": "Орехи", "dairy": "Молочка",
+        "gluten": "Глютен", "seafood": "Морепродукты"
+    }
+    key = callback.data.split(":", 1)[1]
+    value = allergies_map.get(key, key)
     await update_user_prefs(callback.from_user.id, allergies=value)
     await callback.answer(f"Аллергии: {value}")
     await callback.message.edit_text("Какие продукты не любишь?", reply_markup=dislikes_inline())
 
 @router.callback_query(F.data.startswith("set_dislikes:"))
 async def set_dislikes(callback: types.CallbackQuery):
-    value = callback.data.split(":", 1)[1]
+    dislikes_map = {
+        "none": "Нет", "onion": "Лук", "fish": "Рыба",
+        "broccoli": "Брокколи", "garlic": "Чеснок"
+    }
+    key = callback.data.split(":", 1)[1]
+    value = dislikes_map.get(key, key)
     await update_user_prefs(callback.from_user.id, dislikes=value)
     await callback.answer(f"Нелюбимые: {value}")
     await callback.message.edit_text("Какой у тебя уровень готовки?", reply_markup=skill_inline())
 
 @router.callback_query(F.data.startswith("set_skill:"))
 async def set_skill(callback: types.CallbackQuery):
-    skill = callback.data.split(":", 1)[1]
+    skill_map = {
+        "beginner": "Новичок", "intermediate": "Средний", "advanced": "Продвинутый"
+    }
+    key = callback.data.split(":", 1)[1]
+    skill = skill_map.get(key, key)
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень: {skill}")
-    # Заменяем сообщение на финальное и возвращаем главное меню
+    # Редактируем сообщение, убираем кнопки и выводим финальное подтверждение
     await callback.message.edit_text(
         "✅ Профиль сохранён! Теперь рецепты будут персональными.",
-        reply_markup=None  # убираем инлайн-кнопки
+        reply_markup=None
     )
-    # Отправляем главное меню отдельным сообщением
     await callback.message.answer("Главное меню:", reply_markup=main_kb)
 
 # ---------- Редактирование отдельных полей ----------
