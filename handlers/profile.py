@@ -14,7 +14,6 @@ class ProfileForm(StatesGroup):
     dislikes = State()
     skill = State()
 
-# Клавиатуры для каждого шага (обычные кнопки)
 def diet_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -46,7 +45,6 @@ def skip_kb():
         one_time_keyboard=True
     )
 
-# Главное меню (возвращаем после заполнения)
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -79,12 +77,14 @@ async def start_profile(message: types.Message, state: FSMContext):
 
 @router.message(ProfileForm.name, F.text)
 async def process_name(message: types.Message, state: FSMContext):
+    print("DEBUG: process_name")
     await state.update_data(name=message.text)
     await message.answer("Какая у тебя диета или предпочтения по питанию?", reply_markup=diet_kb())
     await state.set_state(ProfileForm.diet)
 
 @router.message(ProfileForm.diet, F.text)
 async def process_diet(message: types.Message, state: FSMContext):
+    print(f"DEBUG: process_diet text={message.text}")
     if message.text not in ["Без ограничений", "Кето", "Веган", "Вегетарианская", "Низкоуглеводная"]:
         await message.answer("Пожалуйста, выбери из вариантов.", reply_markup=diet_kb())
         return
@@ -94,6 +94,7 @@ async def process_diet(message: types.Message, state: FSMContext):
 
 @router.message(ProfileForm.allergies, F.text)
 async def process_allergies(message: types.Message, state: FSMContext):
+    print(f"DEBUG: process_allergies text={message.text}")
     if message.text == "Пропустить":
         await state.update_data(allergies="Нет")
     else:
@@ -103,6 +104,7 @@ async def process_allergies(message: types.Message, state: FSMContext):
 
 @router.message(ProfileForm.dislikes, F.text)
 async def process_dislikes(message: types.Message, state: FSMContext):
+    print(f"DEBUG: process_dislikes text={message.text}")
     if message.text == "Пропустить":
         await state.update_data(dislikes="Нет")
     else:
@@ -112,10 +114,12 @@ async def process_dislikes(message: types.Message, state: FSMContext):
 
 @router.message(ProfileForm.skill, F.text)
 async def process_skill(message: types.Message, state: FSMContext):
+    print(f"DEBUG: process_skill text={message.text}")
     if message.text not in ["Новичок", "Средний", "Продвинутый"]:
         await message.answer("Выбери уровень.", reply_markup=skill_kb())
         return
     data = await state.get_data()
+    print(f"DEBUG: data from state = {data}")
     await update_user_prefs(
         message.from_user.id,
         name=data['name'],
