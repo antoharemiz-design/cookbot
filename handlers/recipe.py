@@ -1,7 +1,6 @@
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import StateFilter
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.ai import get_recipe
@@ -13,7 +12,6 @@ from database.db import (
 
 router = Router()
 
-# Главное меню (улучшенное)
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -103,9 +101,9 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Обработка текстовых запросов (генерация рецепта)
+# Генерация рецепта – сработает только если нет активного состояния (профиль не заполняется)
 @router.message(
-    StateFilter(None),  # только если нет активного состояния
+    StateFilter(None),
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
         "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
@@ -119,7 +117,6 @@ async def generate_recipe(message: types.Message):
 
     await message.answer("Готовлю рецепт...")
 
-    # Загружаем профиль
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
     if prefs:
@@ -147,7 +144,6 @@ async def generate_recipe(message: types.Message):
             )
         return
 
-    # Сохраняем последний рецепт
     await set_last_recipe(message.from_user.id, recipe)
 
     response_text = format_recipe(recipe)
