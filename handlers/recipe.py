@@ -11,45 +11,44 @@ from database.db import (
 
 router = Router()
 
-# Главное меню
+# Главное меню (профессиональный вид)
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🍳 Придумать рецепт")],
-        [KeyboardButton(text="⭐ Мои избранные")],
-        [KeyboardButton(text="🔔 Блюдо дня"), KeyboardButton(text="📅 Меню на неделю")],
-        [KeyboardButton(text="❓ Помощь")]
+        [KeyboardButton(text="🍳 Придумать рецепт"), KeyboardButton(text="⭐ Мои избранные")],
+        [KeyboardButton(text="🔔 Блюдо дня"), KeyboardButton(text="⚙️ Настройки")],
+        [KeyboardButton(text="ℹ️ О боте")]
     ],
     resize_keyboard=True,
-    input_field_placeholder="Выберите действие"
-)
-
-back_kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="🔙 Главное меню")]],
-    resize_keyboard=True
+    input_field_placeholder="Что хотите приготовить?"
 )
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     prefs = await get_user_prefs(message.from_user.id)
     name = prefs.get("name") if prefs else None
-    greeting = f"👋 Привет, {name}!" if name else "👋 Привет!"
+    if name:
+        greeting = f"👋 С возвращением, {name}!"
+    else:
+        greeting = "👋 Добро пожаловать в CookBot!"
     await message.answer(
-        f"{greeting} Я твой личный шеф-помощник.\n"
-        "Выбери действие в меню или просто напиши список продуктов.\n\n"
-        "🔹 Чтобы настроить диету, аллергии или уровень, используй команду /setprefs",
+        f"{greeting}\n\n"
+        "Я твой личный шеф-помощник. Я умею:\n"
+        "• Придумывать рецепты из твоих продуктов\n"
+        "• Учитывать диету, аллергии и предпочтения\n"
+        "• Сохранять любимые рецепты\n"
+        "• Присылать блюдо дня\n\n"
+        "Чтобы я знал твои вкусы, нажми <b>⚙️ Настройки</b> или просто напиши, что есть в холодильнике!\n"
+        "<i>Например: курица, лук, сметана, гречка</i>",
+        parse_mode="HTML",
         reply_markup=main_kb
     )
-
-@router.message(F.text == "🔙 Главное меню")
-async def back_to_main(message: types.Message):
-    await message.answer("Главное меню", reply_markup=main_kb)
 
 @router.message(F.text == "🍳 Придумать рецепт")
 async def prompt_products(message: types.Message):
     await message.answer(
         "Напиши список продуктов через запятую.\n"
-        "Например: <i>курица, лук, сметана, гречка</i>\n\n"
-        "Или можешь просто сказать: «хочу итальянский ужин»",
+        "<i>Например: курица, лук, сметана, гречка</i>\n\n"
+        "Или просто скажи: «хочу итальянский ужин»",
         parse_mode="HTML"
     )
 
@@ -69,7 +68,7 @@ async def show_favorites(message: types.Message):
             callback_data=f"view_fav:{i}"
         ))
     builder.adjust(1)
-    await message.answer("⭐ Ваши избранные рецепты (нажмите для деталей):", reply_markup=builder.as_markup())
+    await message.answer("⭐ <b>Ваши избранные рецепты</b> (нажмите для деталей):", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("view_fav:"))
 async def view_favorite(callback: types.CallbackQuery):
@@ -101,11 +100,10 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генератор рецептов
+# Генератор рецептов (реагирует только на текстовые запросы, не занятые кнопками)
 @router.message(
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
-        "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
-        "❓ Помощь", "🔙 Главное меню"
+        "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "⚙️ Настройки", "ℹ️ О боте"
     ]
 )
 async def generate_recipe(message: types.Message):
@@ -114,7 +112,7 @@ async def generate_recipe(message: types.Message):
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
         return
 
-    await message.answer("Готовлю рецепт...")
+    await message.answer("👨‍🍳 Готовлю рецепт...")
 
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
@@ -132,13 +130,10 @@ async def generate_recipe(message: types.Message):
 
     if recipe is None:
         if raw_response == "RATE_LIMIT":
-            await message.answer("Слишком много запросов. Попробуйте через минуту.")
+            await message.answer("⏳ Слишком много запросов. Попробуйте через минуту.")
         else:
-            debug_info = ""
-            if raw_response:
-                debug_info = f"\n\nОтладка (ответ модели):\n<pre>{raw_response[:1500]}</pre>"
             await message.answer(
-                f"Не удалось создать рецепт.{debug_info}\nПопробуйте другой запрос.",
+                "😔 Не удалось создать рецепт. Попробуйте изменить запрос.",
                 parse_mode="HTML"
             )
         return
@@ -152,8 +147,8 @@ async def generate_recipe(message: types.Message):
         InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=recipe.get("title", ""))
     )
     builder.row(
-        InlineKeyboardButton(text="👍 Вкусно", callback_data=f"rate:{recipe['title']}:1"),
-        InlineKeyboardButton(text="👎 Не очень", callback_data=f"rate:{recipe['title']}:0")
+        InlineKeyboardButton(text="👍", callback_data=f"rate:{recipe['title']}:1"),
+        InlineKeyboardButton(text="👎", callback_data=f"rate:{recipe['title']}:0")
     )
     await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -174,8 +169,7 @@ async def handle_rate(callback: types.CallbackQuery):
         title = parts[1]
         rating = int(parts[2])
         await add_rating(callback.from_user.id, title, rating)
-        emoji = "👍" if rating else "👎"
-        await callback.answer(f"Спасибо за оценку! {emoji}", show_alert=False)
+        await callback.answer("Спасибо за оценку! 🙏", show_alert=False)
         await callback.message.edit_reply_markup(reply_markup=None)
     else:
         await callback.answer()
@@ -185,40 +179,48 @@ async def toggle_daily(message: types.Message):
     subs = await get_all_subscribers()
     if message.from_user.id in subs:
         await remove_subscriber(message.from_user.id)
-        await message.answer("Вы отписались от ежедневных рецептов.")
+        await message.answer("🔕 Вы отписались от блюда дня.")
     else:
         await add_subscriber(message.from_user.id)
-        await message.answer("Теперь вы будете получать блюдо дня в 10:00 UTC! 🍽️")
+        await message.answer("🔔 Теперь вы будете получать блюдо дня в 10:00 UTC! 🍽️")
 
-@router.message(F.text == "📅 Меню на неделю")
-async def week_menu_placeholder(message: types.Message):
-    await message.answer("🚧 Планировщик меню на неделю появится в ближайшее время. Следите за обновлениями!")
+@router.message(F.text == "⚙️ Настройки")
+async def settings_button(message: types.Message):
+    await set_prefs_start(message)  # Прямой вызов той же функции, что и команда /setprefs
 
-@router.message(F.text == "❓ Помощь")
-async def help_cmd(message: types.Message):
+@router.message(F.text == "ℹ️ О боте")
+async def about_bot(message: types.Message):
     await message.answer(
-        "Я могу:\n"
-        "• Придумать рецепт из твоих продуктов\n"
-        "• Учесть диету и аллергии (настрой через /setprefs)\n"
-        "• Сохранить рецепт в избранное\n"
-        "• Оценить рецепт и поделиться им\n"
-        "• Присылать блюдо дня (подпишись 🔔)\n\n"
-        "Просто нажми на кнопку или напиши запрос!",
+        "🤖 <b>CookBot</b> — твой персональный шеф-помощник.\n\n"
+        "Я использую искусственный интеллект, чтобы превратить твои продукты в изысканные блюда.\n"
+        "Просто напиши мне список ингредиентов, и я пришлю пошаговый рецепт!\n\n"
+        "🛠 Команды:\n"
+        "/start – главное меню\n"
+        "/setprefs – настройка диеты, аллергий, уровня\n"
+        "/help – помощь\n\n"
+        "Приятного аппетита! 🍽️",
+        parse_mode="HTML",
         reply_markup=main_kb
     )
+
+@router.message(Command("help"))
+@router.message(F.text == "❓ Помощь")  # на случай, если кто-то вручную вводит
+async def help_cmd(message: types.Message):
+    await about_bot(message)
 
 # ---------- /setprefs ----------
 @router.message(Command("setprefs"))
 async def set_prefs_start(message: types.Message):
     prefs = await get_user_prefs(message.from_user.id) or {}
     current = (
-        f"Диета: {prefs.get('diet', 'не задана')}\n"
-        f"Аллергии: {prefs.get('allergies', 'не заданы')}\n"
-        f"Не любишь: {prefs.get('dislikes', 'не задано')}\n"
-        f"Уровень: {prefs.get('skill', 'не задан')}\n\n"
-        "Выбери, что хочешь изменить:"
+        f"👤 <b>Мои настройки</b>\n"
+        f"🥗 Диета: {prefs.get('diet', 'не задана')}\n"
+        f"⚠️ Аллергии: {prefs.get('allergies', 'не заданы')}\n"
+        f"🚫 Не любишь: {prefs.get('dislikes', 'не задано')}\n"
+        f"👨‍🍳 Уровень: {prefs.get('skill', 'не задан')}\n\n"
+        "Что хотите изменить?"
     )
-    await message.answer(current, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await message.answer(current, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🥗 Диета", callback_data="pref:diet"),
          InlineKeyboardButton(text="⚠️ Аллергии", callback_data="pref:allergies")],
         [InlineKeyboardButton(text="🚫 Нелюбимые", callback_data="pref:dislikes"),
