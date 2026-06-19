@@ -17,9 +17,8 @@ import re
 router = Router()
 logging.basicConfig(level=logging.INFO)
 
-# Главное меню (добавлена строка с квестом)
+# Главное меню
 def make_main_kb(user_id: int):
-    # Добавим квест-подсказку в placeholder
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🍳 Придумать рецепт"), KeyboardButton(text="⭐ Мои избранные")],
@@ -98,7 +97,6 @@ async def cmd_start(message: types.Message):
     else:
         greeting = "👋 Добро пожаловать в CookBot!"
 
-    # Получаем квест
     quest = await get_or_create_quest(message.from_user.id)
     quest_text = ""
     if not quest["completed"]:
@@ -176,7 +174,7 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генератор рецептов (основная логика)
+# Генератор рецептов
 @router.message(
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "📖 Дневник", "🏆 Статистика",
@@ -240,9 +238,10 @@ async def generate_recipe(message: types.Message):
         InlineKeyboardButton(text="⭐ В избранное", callback_data="save_last"),
         InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=recipe.get("title", ""))
     )
+    # Безопасные кнопки оценок (без названия рецепта)
     builder.row(
-        InlineKeyboardButton(text="👍", callback_data=f"rate:{recipe['title']}:1"),
-        InlineKeyboardButton(text="👎", callback_data=f"rate:{recipe['title']}:0")
+        InlineKeyboardButton(text="👍", callback_data="rate:1"),
+        InlineKeyboardButton(text="👎", callback_data="rate:0")
     )
     await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -271,15 +270,22 @@ async def save_last_recipe(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("rate:"))
 async def handle_rate(callback: types.CallbackQuery):
-    parts = callback.data.split(":")
-    if len(parts) >= 3:
-        title = parts[1]
-        rating = int(parts[2])
-        await add_rating(callback.from_user.id, title, rating)
-        await callback.answer("Спасибо за оценку! 🙏", show_alert=False)
-        await callback.message.edit_reply_markup(reply_markup=None)
-    else:
+    # Получаем рецепт из last_recipe
+    recipe = await get_last_recipe(callback.from_user.id)
+    if recipe is None:
+        await callback.answer("Рецепт не найден.", show_alert=True)
+        return
+    # Извлекаем оценку (1 или 0)
+    rating_str = callback.data.split(":")[1]
+    if rating_str not in ("1", "0"):
         await callback.answer()
+        return
+    rating = int(rating_str)
+    title = recipe.get("title", "Без названия")
+    await add_rating(callback.from_user.id, title, rating)
+    emoji = "👍" if rating else "👎"
+    await callback.answer(f"Спасибо за оценку! {emoji}", show_alert=False)
+    await callback.message.edit_reply_markup(reply_markup=None)
 
 @router.message(F.text == "📖 Дневник")
 async def show_diary(message: types.Message):
@@ -300,7 +306,6 @@ async def show_stats(message: types.Message):
     achievements = await get_user_achievements(message.from_user.id)
     completed_quests = await get_completed_quests_count(message.from_user.id)
 
-    # Определение уровня и прогресса
     level = "Новичок"
     next_level = "Умелец"
     points_needed = 50
