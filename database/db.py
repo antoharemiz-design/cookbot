@@ -1,10 +1,12 @@
 import aiosqlite
 from pathlib import Path
+from datetime import date
+import random
 
 DB_PATH = Path(__file__).parent.parent / "cookbot.db"
 
 EXPECTED_COLUMNS = {
-    "user_prefs": ["user_id", "name", "diet", "allergies", "dislikes", "skill"]
+    "user_prefs": ["user_id", "name", "diet", "allergies", "dislikes", "skill", "score"]
 }
 
 async def init_db():
@@ -21,7 +23,7 @@ async def init_db():
             if col not in existing_cols:
                 await db.execute(f"ALTER TABLE user_prefs ADD COLUMN {col} TEXT")
 
-        # Избранное
+        # Остальные таблицы
         await db.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
                 user_id INTEGER NOT NULL,
@@ -30,21 +32,18 @@ async def init_db():
                 UNIQUE(user_id, recipe_json)
             )
         """)
-        # Последний рецепт
         await db.execute("""
             CREATE TABLE IF NOT EXISTS last_recipe (
                 user_id INTEGER PRIMARY KEY,
                 recipe_json TEXT NOT NULL
             )
         """)
-        # Подписки на блюдо дня
         await db.execute("""
             CREATE TABLE IF NOT EXISTS subscribers (
                 user_id INTEGER PRIMARY KEY,
                 active INTEGER DEFAULT 1
             )
         """)
-        # Оценки
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ratings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +52,6 @@ async def init_db():
                 rating INTEGER
             )
         """)
-        # Дневник приготовленных блюд
         await db.execute("""
             CREATE TABLE IF NOT EXISTS cook_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,16 +60,15 @@ async def init_db():
                 cooked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Ежедневные квесты
         await db.execute("""
             CREATE TABLE IF NOT EXISTS quests (
                 user_id INTEGER PRIMARY KEY,
                 quest_date DATE NOT NULL,
+                quest_type TEXT NOT NULL,
                 description TEXT NOT NULL,
                 completed INTEGER DEFAULT 0
             )
         """)
-        # Достижения
         await db.execute("""
             CREATE TABLE IF NOT EXISTS achievements (
                 user_id INTEGER NOT NULL,
@@ -158,6 +155,15 @@ async def get_user_prefs(user_id: int) -> dict | None:
         columns = [desc[0] for desc in cur.description]
         return dict(zip(columns, row))
 
+async def add_score(user_id: int, points: int):
+    prefs = await get_user_prefs(user_id)
+    current = int(prefs.get("score", 0)) if prefs else 0
+    await update_user_prefs(user_id, score=current + points)
+
+async def get_score(user_id: int) -> int:
+    prefs = await get_user_prefs(user_id)
+    return int(prefs.get("score", 0)) if prefs else 0
+
 # ---------- Подписки ----------
 async def add_subscriber(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -181,7 +187,7 @@ async def add_rating(user_id: int, recipe_title: str, rating: int):
         await db.execute("INSERT INTO ratings (user_id, recipe_title, rating) VALUES (?, ?, ?)", (user_id, recipe_title, rating))
         await db.commit()
 
-# ---------- Дневник (cook_log) ----------
+# ---------- Дневник ----------
 async def add_cook_log(user_id: int, recipe: dict):
     import json
     recipe_str = json.dumps(recipe, ensure_ascii=False)
@@ -200,7 +206,18 @@ async def get_cook_log(user_id: int, limit: int = 10) -> list[dict]:
         return [json.loads(row[0]) for row in rows]
 
 # ---------- Квесты ----------
-from datetime import date
+QUEST_TYPES = {
+    "vegan": "Приготовь веганское блюдо (без мяса, рыбы, яиц, молочки)",
+    "three_ingredients": "Используй ровно 3 ингредиента",
+    "no_meat": "Приготовь блюдо без мяса",
+    "dessert": "Приготовь десерт",
+    "red_product": "Используй что-то красное (помидор, перец, клубника, свёкла)",
+    "fast": "Приготовь за 20 минут или быстрее",
+    "new_cuisine": "Попробуй новую кухню (итальянская, японская, мексиканская)",
+}
+
+def get_quest_types():
+    return list(QUEST_TYPES.keys())
 
 async def get_or_create_quest(user_id: int) -> dict:
     today = date.today().isoformat()
@@ -208,22 +225,14 @@ async def get_or_create_quest(user_id: int) -> dict:
         cur = await db.execute("SELECT * FROM quests WHERE user_id = ? AND quest_date = ?", (user_id, today))
         row = await cur.fetchone()
         if row:
-            return {"description": row[2], "completed": bool(row[3])}
-        # Генерируем случайный квест
-        import random
-        quests = [
-            "Приготовь веганское блюдо",
-            "Используй ровно 3 ингредиента",
-            "Приготовь блюдо без мяса",
-            "Сделай десерт",
-            "Используй что-то красное",
-            "Приготовь за 20 минут",
-            "Попробуй новую кухню (например, азиатскую)"
-        ]
-        desc = random.choice(quests)
-        await db.execute("INSERT INTO quests (user_id, quest_date, description) VALUES (?, ?, ?)", (user_id, today, desc))
+            return {"type": row[2], "description": row[3], "completed": bool(row[4])}
+        # Генерируем новый квест
+        quest_type = random.choice(get_quest_types())
+        description = QUEST_TYPES[quest_type]
+        await db.execute("INSERT INTO quests (user_id, quest_date, quest_type, description) VALUES (?, ?, ?, ?)",
+                         (user_id, today, quest_type, description))
         await db.commit()
-        return {"description": desc, "completed": False}
+        return {"type": quest_type, "description": description, "completed": False}
 
 async def complete_quest(user_id: int):
     today = date.today().isoformat()
@@ -231,35 +240,26 @@ async def complete_quest(user_id: int):
         await db.execute("UPDATE quests SET completed = 1 WHERE user_id = ? AND quest_date = ?", (user_id, today))
         await db.commit()
 
+async def is_quest_completed_today(user_id: int) -> bool:
+    quest = await get_or_create_quest(user_id)
+    return quest["completed"]
+
 # ---------- Достижения ----------
 ACHIEVEMENTS = {
-    "first_recipe": {"name": "Первый рецепт", "desc": "Приготовь своё первое блюдо", "icon": "🍽️"},
-    "five_recipes": {"name": "Умелец", "desc": "Приготовь 5 блюд", "icon": "🥘"},
-    "ten_recipes": {"name": "Шеф", "desc": "Приготовь 10 блюд", "icon": "👨‍🍳"},
-    "world_tour": {"name": "Мировой тур", "desc": "Приготовь блюда 3 разных кухонь", "icon": "🌍"},
-    "fast_chef": {"name": "Быстрый шеф", "desc": "Приготовь блюдо с временем готовки ≤15 минут", "icon": "⏱️"},
+    "first_recipe": {"name": "Первый рецепт", "desc": "Приготовьте своё первое блюдо", "icon": "🍽️", "points": 10},
+    "five_recipes": {"name": "Умелец", "desc": "Приготовьте 5 блюд", "icon": "🥘", "points": 30},
+    "ten_recipes": {"name": "Шеф", "desc": "Приготовьте 10 блюд", "icon": "👨‍🍳", "points": 50},
+    "first_quest": {"name": "Квестер", "desc": "Выполните первый квест", "icon": "⚔️", "points": 20},
+    "five_quests": {"name": "Охотник за квестами", "desc": "Выполните 5 квестов", "icon": "🏹", "points": 50},
+    "score_100": {"name": "Сотня", "desc": "Наберите 100 очков", "icon": "💯", "points": 100},
+    "fast_chef": {"name": "Быстрый шеф", "desc": "Приготовьте блюдо ≤15 минут", "icon": "⏱️", "points": 20},
 }
-
-async def check_and_grant_achievements(user_id: int):
-    # Считаем количество приготовленных блюд
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT COUNT(*) FROM cook_log WHERE user_id = ?", (user_id,))
-        count = (await cur.fetchone())[0]
-
-        # Первый рецепт
-        if count >= 1 and not await has_achievement(user_id, "first_recipe"):
-            await grant_achievement(user_id, "first_recipe")
-        if count >= 5 and not await has_achievement(user_id, "five_recipes"):
-            await grant_achievement(user_id, "five_recipes")
-        if count >= 10 and not await has_achievement(user_id, "ten_recipes"):
-            await grant_achievement(user_id, "ten_recipes")
 
 async def grant_achievement(user_id: int, key: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR IGNORE INTO achievements (user_id, achievement_key) VALUES (?, ?)", (user_id, key))
         await db.commit()
-    # Возвращаем инфу для уведомления
-    return ACHIEVEMENTS[key]
+    return ACHIEVEMENTS.get(key)
 
 async def has_achievement(user_id: int, key: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -276,3 +276,36 @@ async def get_cooked_count(user_id: int) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT COUNT(*) FROM cook_log WHERE user_id = ?", (user_id,))
         return (await cur.fetchone())[0]
+
+async def get_completed_quests_count(user_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM quests WHERE user_id = ? AND completed = 1", (user_id,))
+        return (await cur.fetchone())[0]
+
+async def check_and_grant_achievements(user_id: int):
+    # Вызывается после каждого приготовления
+    cooked = await get_cooked_count(user_id)
+    completed_quests = await get_completed_quests_count(user_id)
+    score = await get_score(user_id)
+    new_achievements = []
+
+    if cooked >= 1 and not await has_achievement(user_id, "first_recipe"):
+        await grant_achievement(user_id, "first_recipe")
+        new_achievements.append(ACHIEVEMENTS["first_recipe"])
+    if cooked >= 5 and not await has_achievement(user_id, "five_recipes"):
+        await grant_achievement(user_id, "five_recipes")
+        new_achievements.append(ACHIEVEMENTS["five_recipes"])
+    if cooked >= 10 and not await has_achievement(user_id, "ten_recipes"):
+        await grant_achievement(user_id, "ten_recipes")
+        new_achievements.append(ACHIEVEMENTS["ten_recipes"])
+    if completed_quests >= 1 and not await has_achievement(user_id, "first_quest"):
+        await grant_achievement(user_id, "first_quest")
+        new_achievements.append(ACHIEVEMENTS["first_quest"])
+    if completed_quests >= 5 and not await has_achievement(user_id, "five_quests"):
+        await grant_achievement(user_id, "five_quests")
+        new_achievements.append(ACHIEVEMENTS["five_quests"])
+    if score >= 100 and not await has_achievement(user_id, "score_100"):
+        await grant_achievement(user_id, "score_100")
+        new_achievements.append(ACHIEVEMENTS["score_100"])
+
+    return new_achievements
