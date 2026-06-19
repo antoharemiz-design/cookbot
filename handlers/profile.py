@@ -42,6 +42,17 @@ skip_kb = ReplyKeyboardMarkup(
     one_time_keyboard=True
 )
 
+# Главное меню (чтобы сразу вернуть после профиля)
+main_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🍳 Придумать рецепт")],
+        [KeyboardButton(text="⭐ Мои избранные")],
+        [KeyboardButton(text="🔔 Блюдо дня"), KeyboardButton(text="📅 Меню на неделю")],
+        [KeyboardButton(text="⚙️ Профиль"), KeyboardButton(text="❓ Помощь")]
+    ],
+    resize_keyboard=True
+)
+
 @router.message(Command("profile"))
 @router.message(F.text == "⚙️ Профиль")
 async def start_profile(message: types.Message, state: FSMContext):
@@ -55,23 +66,20 @@ async def start_profile(message: types.Message, state: FSMContext):
             f"🚫 Не любишь: {prefs.get('dislikes', '-')}\n"
             f"👨‍🍳 Уровень: {prefs.get('skill', '-')}\n\n"
             "Чтобы изменить, нажми /profile ещё раз.",
-            reply_markup=types.ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="🔙 Главное меню")]],
-                resize_keyboard=True
-            )
+            reply_markup=main_kb
         )
         return
 
     await message.answer("Давай познакомимся! Как тебя зовут?")
     await state.set_state(ProfileForm.name)
 
-@router.message(ProfileForm.name, flags={"stop_propagation": True})
+@router.message(ProfileForm.name, F.text)
 async def process_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("Какая у тебя диета или предпочтения по питанию?", reply_markup=diet_kb)
     await state.set_state(ProfileForm.diet)
 
-@router.message(ProfileForm.diet, flags={"stop_propagation": True})
+@router.message(ProfileForm.diet, F.text)
 async def process_diet(message: types.Message, state: FSMContext):
     if message.text not in ["Без ограничений", "Кето", "Веган", "Вегетарианская", "Низкоуглеводная"]:
         await message.answer("Пожалуйста, выбери из вариантов или нажми 'Пропустить'.", reply_markup=diet_kb)
@@ -80,7 +88,7 @@ async def process_diet(message: types.Message, state: FSMContext):
     await message.answer("Есть ли у тебя аллергии? (например: орехи, молочка, глютен). Если нет, напиши 'нет'.", reply_markup=skip_kb)
     await state.set_state(ProfileForm.allergies)
 
-@router.message(ProfileForm.allergies, flags={"stop_propagation": True})
+@router.message(ProfileForm.allergies, F.text)
 async def process_allergies(message: types.Message, state: FSMContext):
     if message.text == "Пропустить":
         await state.update_data(allergies="Нет")
@@ -89,7 +97,7 @@ async def process_allergies(message: types.Message, state: FSMContext):
     await message.answer("Какие продукты ты не любишь? (например: лук, рыба, брокколи). Можно пропустить.", reply_markup=skip_kb)
     await state.set_state(ProfileForm.dislikes)
 
-@router.message(ProfileForm.dislikes, flags={"stop_propagation": True})
+@router.message(ProfileForm.dislikes, F.text)
 async def process_dislikes(message: types.Message, state: FSMContext):
     if message.text == "Пропустить":
         await state.update_data(dislikes="Нет")
@@ -98,11 +106,8 @@ async def process_dislikes(message: types.Message, state: FSMContext):
     await message.answer("Какой у тебя уровень готовки?", reply_markup=skill_kb)
     await state.set_state(ProfileForm.skill)
 
-@router.message(ProfileForm.skill, flags={"stop_propagation": True})
+@router.message(ProfileForm.skill, F.text.in_(["Новичок", "Средний", "Продвинутый"]))
 async def process_skill(message: types.Message, state: FSMContext):
-    if message.text not in ["Новичок", "Средний", "Продвинутый"]:
-        await message.answer("Выбери уровень.", reply_markup=skill_kb)
-        return
     data = await state.get_data()
     await update_user_prefs(
         message.from_user.id,
@@ -115,8 +120,5 @@ async def process_skill(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
         f"Отлично, {data['name']}! Твой профиль сохранён. Теперь рецепты будут подбираться с учётом твоих предпочтений.",
-        reply_markup=types.ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="🔙 Главное меню")]],
-            resize_keyboard=True
-        )
+        reply_markup=main_kb
     )
