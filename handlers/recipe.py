@@ -9,7 +9,7 @@ from database.db import (
     add_subscriber, remove_subscriber, get_all_subscribers, add_rating,
     add_cook_log, get_cook_log, get_or_create_quest, complete_quest, is_quest_completed_today,
     check_and_grant_achievements, get_user_achievements, get_cooked_count, get_score, add_score,
-    grant_achievement, ACHIEVEMENTS, QUEST_TYPES
+    grant_achievement, has_achievement, ACHIEVEMENTS, QUEST_TYPES, get_completed_quests_count
 )
 import logging
 import re
@@ -66,7 +66,6 @@ def match_quest(recipe: dict, quest_type: str) -> bool:
             for f in forbidden:
                 if f in ing:
                     return False
-        # Проверяем шаги на наличие запретных слов (но обычно достаточно ингредиентов)
         return True
     elif quest_type == "three_ingredients":
         return len(recipe.get("ingredients", [])) == 3
@@ -224,7 +223,6 @@ async def generate_recipe(message: types.Message):
             mins = int(match.group(1))
             if mins <= 15:
                 await grant_achievement(message.from_user.id, "fast_chef")
-                bonus_earned = True  # можно отдельно уведомить, но мы пока просто проверим
 
     new_achievements = await check_and_grant_achievements(message.from_user.id)
 
@@ -249,7 +247,6 @@ async def generate_recipe(message: types.Message):
         for ach in new_achievements:
             notifications.append(f"🏆 Новое достижение: {ach['icon']} {ach['name']} – {ach['desc']}")
     if not quest_completed and not bonus_earned:
-        # Напоминаем о текущем квесте
         notifications.append(f"📌 <b>Квест дня:</b> {quest['description']}")
 
     if notifications:
