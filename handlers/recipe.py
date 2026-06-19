@@ -112,6 +112,7 @@ async def delete_favorite(callback: types.CallbackQuery):
     ]
 )
 async def generate_recipe(message: types.Message):
+    print(f"DEBUG: generate_recipe called with text={message.text}")
     user_input = message.text.strip()
     if len(user_input) < 3:
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
