@@ -302,7 +302,12 @@ async def set_skill(callback: types.CallbackQuery):
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
-
+# ---------- ВРЕМЕННЫЙ ОТЛАДОЧНЫЙ ОБРАБОТЧИК ----------
+@router.callback_query()
+async def debug_any_callback(callback: types.CallbackQuery):
+    logging.info(f"DEBUG CALLBACK: {callback.data}")
+    await callback.answer(f"DEBUG: {callback.data}", show_alert=True)
+    
 def format_recipe(recipe: dict) -> str:
     text = (
         f"🍽 <b>{recipe.get('title', 'Блюдо')}</b>\n"
