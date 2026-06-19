@@ -157,12 +157,13 @@ async def get_user_prefs(user_id: int) -> dict | None:
 
 async def add_score(user_id: int, points: int):
     prefs = await get_user_prefs(user_id)
-    current = int(prefs.get("score", 0)) if prefs else 0
+    # Безопасно получаем текущее значение score, убирая None
+    current = int(prefs.get("score") or 0) if prefs else 0
     await update_user_prefs(user_id, score=current + points)
 
 async def get_score(user_id: int) -> int:
     prefs = await get_user_prefs(user_id)
-    return int(prefs.get("score", 0)) if prefs else 0
+    return int(prefs.get("score") or 0) if prefs else 0
 
 # ---------- Подписки ----------
 async def add_subscriber(user_id: int):
@@ -226,7 +227,6 @@ async def get_or_create_quest(user_id: int) -> dict:
         row = await cur.fetchone()
         if row:
             return {"type": row[2], "description": row[3], "completed": bool(row[4])}
-        # Генерируем новый квест
         quest_type = random.choice(get_quest_types())
         description = QUEST_TYPES[quest_type]
         await db.execute("INSERT INTO quests (user_id, quest_date, quest_type, description) VALUES (?, ?, ?, ?)",
@@ -283,7 +283,6 @@ async def get_completed_quests_count(user_id: int) -> int:
         return (await cur.fetchone())[0]
 
 async def check_and_grant_achievements(user_id: int):
-    # Вызывается после каждого приготовления
     cooked = await get_cooked_count(user_id)
     completed_quests = await get_completed_quests_count(user_id)
     score = await get_score(user_id)
