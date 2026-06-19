@@ -75,16 +75,14 @@ async def start_profile(message: types.Message, state: FSMContext):
     await message.answer("Давай познакомимся! Как тебя зовут?")
     await state.set_state(ProfileForm.name)
 
-@router.message(ProfileForm.name, F.text)
+@router.message(ProfileForm.name, F.text, flags={"stop_propagation": True})
 async def process_name(message: types.Message, state: FSMContext):
-    print("DEBUG: process_name")
     await state.update_data(name=message.text)
     await message.answer("Какая у тебя диета или предпочтения по питанию?", reply_markup=diet_kb())
     await state.set_state(ProfileForm.diet)
 
-@router.message(ProfileForm.diet, F.text)
+@router.message(ProfileForm.diet, F.text, flags={"stop_propagation": True})
 async def process_diet(message: types.Message, state: FSMContext):
-    print(f"DEBUG: process_diet text={message.text}")
     if message.text not in ["Без ограничений", "Кето", "Веган", "Вегетарианская", "Низкоуглеводная"]:
         await message.answer("Пожалуйста, выбери из вариантов.", reply_markup=diet_kb())
         return
@@ -92,9 +90,8 @@ async def process_diet(message: types.Message, state: FSMContext):
     await message.answer("Есть ли у тебя аллергии? (например: орехи, молочка, глютен). Если нет, напиши 'нет'.", reply_markup=skip_kb())
     await state.set_state(ProfileForm.allergies)
 
-@router.message(ProfileForm.allergies, F.text)
+@router.message(ProfileForm.allergies, F.text, flags={"stop_propagation": True})
 async def process_allergies(message: types.Message, state: FSMContext):
-    print(f"DEBUG: process_allergies text={message.text}")
     if message.text == "Пропустить":
         await state.update_data(allergies="Нет")
     else:
@@ -102,9 +99,8 @@ async def process_allergies(message: types.Message, state: FSMContext):
     await message.answer("Какие продукты ты не любишь? (например: лук, рыба, брокколи). Можно пропустить.", reply_markup=skip_kb())
     await state.set_state(ProfileForm.dislikes)
 
-@router.message(ProfileForm.dislikes, F.text)
+@router.message(ProfileForm.dislikes, F.text, flags={"stop_propagation": True})
 async def process_dislikes(message: types.Message, state: FSMContext):
-    print(f"DEBUG: process_dislikes text={message.text}")
     if message.text == "Пропустить":
         await state.update_data(dislikes="Нет")
     else:
@@ -112,14 +108,12 @@ async def process_dislikes(message: types.Message, state: FSMContext):
     await message.answer("Какой у тебя уровень готовки?", reply_markup=skill_kb())
     await state.set_state(ProfileForm.skill)
 
-@router.message(ProfileForm.skill, F.text)
+@router.message(ProfileForm.skill, F.text, flags={"stop_propagation": True})
 async def process_skill(message: types.Message, state: FSMContext):
-    print(f"DEBUG: process_skill text={message.text}")
     if message.text not in ["Новичок", "Средний", "Продвинутый"]:
         await message.answer("Выбери уровень.", reply_markup=skill_kb())
         return
     data = await state.get_data()
-    print(f"DEBUG: data from state = {data}")
     await update_user_prefs(
         message.from_user.id,
         name=data['name'],
