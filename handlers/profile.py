@@ -1,5 +1,5 @@
 from aiogram import Router, types, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
@@ -10,6 +10,7 @@ router = Router()
 class NameState(StatesGroup):
     waiting_for_name = State()
 
+# Главное меню
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -20,6 +21,7 @@ main_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Инлайн-клавиатуры
 def diet_inline():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Без ограничений", callback_data="set_diet:none")],
@@ -54,7 +56,6 @@ def skill_inline():
         [InlineKeyboardButton(text="Продвинутый", callback_data="set_skill:advanced")]
     ])
 
-# ---------- Старт профиля ----------
 @router.message(Command("profile"))
 @router.message(F.text == "⚙️ Профиль")
 async def profile_start(message: types.Message, state: FSMContext):
@@ -91,7 +92,7 @@ async def process_name(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(f"Отлично, {name}! Выбери диету:", reply_markup=diet_inline())
 
-# ---------- Инлайн-обработчики ----------
+# Обработчики с конкретными фильтрами
 @router.callback_query(F.data.startswith("set_diet:"))
 async def set_diet(callback: types.CallbackQuery):
     diet_map = {
@@ -143,7 +144,7 @@ async def set_skill(callback: types.CallbackQuery):
     )
     await callback.message.answer("Главное меню:", reply_markup=main_kb)
 
-# ---------- Редактирование отдельных полей ----------
+# Редактирование отдельных полей
 @router.callback_query(F.data == "edit_name")
 async def edit_name(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
