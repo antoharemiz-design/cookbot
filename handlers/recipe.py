@@ -196,7 +196,20 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генератор рецептов
+# ---------- Обработчик ответа для холодильника (ВАЖНО: до генератора рецептов) ----------
+@router.message(F.reply_to_message)
+async def handle_reply_for_fridge(message: types.Message):
+    if message.reply_to_message.text and "Напишите название продукта" in message.reply_to_message.text:
+        product = message.text.strip().lower()
+        if not product:
+            await message.answer("Вы не ввели продукт. Попробуйте ещё раз.")
+            return
+        await add_to_fridge(message.from_user.id, product)
+        await message.answer(f"✅ {product} добавлен в холодильник!")
+    # Если это не ответ на добавление, ничего не делаем – сообщение пойдёт дальше
+    # и попадёт в генератор рецептов, что нормально для других случаев.
+
+# ---------- Генератор рецептов ----------
 @router.message(
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🧊 Мой холодильник", "📖 Дневник",
@@ -328,7 +341,6 @@ async def fridge_menu(message: types.Message):
 
 @router.callback_query(F.data == "fridge_add")
 async def fridge_add_prompt(callback: types.CallbackQuery):
-    # Просим ответить на это сообщение
     await callback.message.answer(
         "Напишите название продукта, который хотите добавить (например: помидор).\n"
         "<i>Для добавления ответьте на это сообщение.</i>",
@@ -364,21 +376,6 @@ async def fridge_delete(callback: types.CallbackQuery):
         InlineKeyboardButton(text="❌ Удалить", callback_data="fridge_remove")
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
-
-# Хендлер для добавления продукта: только ответ на сообщение с запросом добавления
-@router.message(F.reply_to_message)
-async def handle_reply_for_fridge(message: types.Message):
-    # Проверяем, что сообщение, на которое отвечают, содержит приглашение добавить продукт
-    if message.reply_to_message.text and "Напишите название продукта" in message.reply_to_message.text:
-        product = message.text.strip().lower()
-        if not product:
-            await message.answer("Вы не ввели продукт. Попробуйте ещё раз.")
-            return
-        await add_to_fridge(message.from_user.id, product)
-        await message.answer(f"✅ {product} добавлен в холодильник!")
-    # Если ответ не на то сообщение, просто ничего не делаем (или можно передать дальше)
-    # но чтобы не мешать генератору, не будем обрабатывать другие ответы
-    # (генератор не сработает, потому что сообщение начинается с reply)
 
 # ---------- Дневник ----------
 @router.message(F.text == "📖 Дневник")
