@@ -5,6 +5,7 @@ DB_PATH = Path(__file__).parent.parent / "cookbot.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        # Существующие таблицы
         await db.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
                 user_id INTEGER NOT NULL,
@@ -16,9 +17,11 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_prefs (
                 user_id INTEGER PRIMARY KEY,
+                name TEXT,
                 diet TEXT,
                 allergies TEXT,
-                dislikes TEXT
+                dislikes TEXT,
+                skill TEXT
             )
         """)
         await db.execute("""
@@ -27,57 +30,61 @@ async def init_db():
                 recipe_json TEXT NOT NULL
             )
         """)
+        # Новые таблицы
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS subscribers (
+                user_id INTEGER PRIMARY KEY,
+                active INTEGER DEFAULT 1
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ratings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                recipe_json TEXT,
+                rating INTEGER
+            )
+        """)
         await db.commit()
 
-async def add_favorite(user_id: int, recipe: dict):
-    import json
-    recipe_str = json.dumps(recipe, ensure_ascii=False)
+# ... остальные функции (добавим новые)
+async def update_user_prefs(user_id: int, **kwargs):
+    """Обновить или создать профиль"""
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT OR IGNORE INTO favorites (user_id, recipe_json) VALUES (?, ?)",
-            (user_id, recipe_str)
-        )
+        # Проверим, существует ли запись
+        cur = await db.execute("SELECT user_id FROM user_prefs WHERE user_id = ?", (user_id,))
+        if await cur.fetchone():
+            # Update
+            sets = ", ".join(f"{k} = ?" for k in kwargs)
+            await db.execute(f"UPDATE user_prefs SET {sets} WHERE user_id = ?", (*kwargs.values(), user_id))
+        else:
+            # Insert
+            cols = ", ".join(kwargs.keys())
+            placeholders = ", ".join("?" for _ in kwargs)
+            await db.execute(f"INSERT INTO user_prefs (user_id, {cols}) VALUES (?, {placeholders})", (user_id, *kwargs.values()))
         await db.commit()
 
-async def get_favorites(user_id: int) -> list[dict]:
-    import json
+async def get_user_prefs(user_id: int) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT recipe_json FROM favorites WHERE user_id = ? ORDER BY added_at DESC",
-            (user_id,)
-        )
-        rows = await cursor.fetchall()
-        return [json.loads(row[0]) for row in rows]
+        cur = await db.execute("SELECT * FROM user_prefs WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cur.description]
+        return dict(zip(columns, row))
 
-async def remove_favorite(user_id: int, recipe_title: str):
+async def add_subscriber(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT rowid FROM favorites WHERE user_id = ? AND recipe_json LIKE ? LIMIT 1",
-            (user_id, f'%{recipe_title}%')
-        )
-        row = await cursor.fetchone()
-        if row:
-            await db.execute("DELETE FROM favorites WHERE rowid = ?", (row[0],))
-            await db.commit()
-            return True
-    return False
-
-async def set_last_recipe(user_id: int, recipe: dict):
-    import json
-    recipe_str = json.dumps(recipe, ensure_ascii=False)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT OR REPLACE INTO last_recipe (user_id, recipe_json) VALUES (?, ?)",
-            (user_id, recipe_str)
-        )
+        await db.execute("INSERT OR REPLACE INTO subscribers (user_id, active) VALUES (?, 1)", (user_id,))
         await db.commit()
 
-async def get_last_recipe(user_id: int) -> dict | None:
-    import json
+async def remove_subscriber(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT recipe_json FROM last_recipe WHERE user_id = ?",
-            (user_id,)
-        )
-        row = await cursor.fetchone()
-        return json.loads(row[0]) if row else None
+        await db.execute("DELETE FROM subscribers WHERE user_id = ?", (user_id,))
+        await db.commit()
+
+async def get_all_subscribers():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id FROM subscribers WHERE active = 1")
+        rows = await cur.fetchall()
+        return [r[0] for r in rows]
