@@ -8,10 +8,12 @@ from database.db import (
     set_last_recipe, get_last_recipe, get_user_prefs, update_user_prefs,
     add_subscriber, remove_subscriber, get_all_subscribers, add_rating
 )
+import logging
 
 router = Router()
+logging.basicConfig(level=logging.INFO)
 
-# Главное меню (без профиля)
+# Главное меню (только рабочие кнопки)
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
@@ -101,11 +103,11 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генератор рецептов (без фильтра FSM)
+# Генератор рецептов
 @router.message(
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
-        "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
+        "❓ Помощь", "🔙 Главное меню"
     ]
 )
 async def generate_recipe(message: types.Message):
@@ -230,36 +232,36 @@ async def pref_callback(callback: types.CallbackQuery):
     field = callback.data.split(":")[1]
     if field == "diet":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Без ограничений", callback_data="set_diet:Без ограничений")],
-            [InlineKeyboardButton(text="Кето", callback_data="set_diet:Кето")],
-            [InlineKeyboardButton(text="Веган", callback_data="set_diet:Веган")],
-            [InlineKeyboardButton(text="Вегетарианская", callback_data="set_diet:Вегетарианская")],
-            [InlineKeyboardButton(text="Низкоуглеводная", callback_data="set_diet:Низкоуглеводная")]
+            [InlineKeyboardButton(text="Без ограничений", callback_data="set_diet:none")],
+            [InlineKeyboardButton(text="Кето", callback_data="set_diet:keto")],
+            [InlineKeyboardButton(text="Веган", callback_data="set_diet:vegan")],
+            [InlineKeyboardButton(text="Вегетарианская", callback_data="set_diet:vegetarian")],
+            [InlineKeyboardButton(text="Низкоуглеводная", callback_data="set_diet:lowcarb")]
         ])
         await callback.message.answer("Выбери диету:", reply_markup=kb)
     elif field == "allergies":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Нет", callback_data="set_allergies:Нет")],
-            [InlineKeyboardButton(text="Орехи", callback_data="set_allergies:Орехи")],
-            [InlineKeyboardButton(text="Молочка", callback_data="set_allergies:Молочка")],
-            [InlineKeyboardButton(text="Глютен", callback_data="set_allergies:Глютен")],
-            [InlineKeyboardButton(text="Морепродукты", callback_data="set_allergies:Морепродукты")]
+            [InlineKeyboardButton(text="Нет", callback_data="set_allergies:none")],
+            [InlineKeyboardButton(text="Орехи", callback_data="set_allergies:nuts")],
+            [InlineKeyboardButton(text="Молочка", callback_data="set_allergies:dairy")],
+            [InlineKeyboardButton(text="Глютен", callback_data="set_allergies:gluten")],
+            [InlineKeyboardButton(text="Морепродукты", callback_data="set_allergies:seafood")]
         ])
         await callback.message.answer("Выбери аллергены:", reply_markup=kb)
     elif field == "dislikes":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Нет", callback_data="set_dislikes:Нет")],
-            [InlineKeyboardButton(text="Лук", callback_data="set_dislikes:Лук")],
-            [InlineKeyboardButton(text="Рыба", callback_data="set_dislikes:Рыба")],
-            [InlineKeyboardButton(text="Брокколи", callback_data="set_dislikes:Брокколи")],
-            [InlineKeyboardButton(text="Чеснок", callback_data="set_dislikes:Чеснок")]
+            [InlineKeyboardButton(text="Нет", callback_data="set_dislikes:none")],
+            [InlineKeyboardButton(text="Лук", callback_data="set_dislikes:onion")],
+            [InlineKeyboardButton(text="Рыба", callback_data="set_dislikes:fish")],
+            [InlineKeyboardButton(text="Брокколи", callback_data="set_dislikes:broccoli")],
+            [InlineKeyboardButton(text="Чеснок", callback_data="set_dislikes:garlic")]
         ])
         await callback.message.answer("Что не любишь?", reply_markup=kb)
     elif field == "skill":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Новичок", callback_data="set_skill:Новичок")],
-            [InlineKeyboardButton(text="Средний", callback_data="set_skill:Средний")],
-            [InlineKeyboardButton(text="Продвинутый", callback_data="set_skill:Продвинутый")]
+            [InlineKeyboardButton(text="Новичок", callback_data="set_skill:beginner")],
+            [InlineKeyboardButton(text="Средний", callback_data="set_skill:intermediate")],
+            [InlineKeyboardButton(text="Продвинутый", callback_data="set_skill:advanced")]
         ])
         await callback.message.answer("Твой уровень:", reply_markup=kb)
     await callback.answer()
@@ -267,31 +269,39 @@ async def pref_callback(callback: types.CallbackQuery):
 # Обработчики установки значений
 @router.callback_query(F.data.startswith("set_diet:"))
 async def set_diet(callback: types.CallbackQuery):
-    diet = callback.data.split(":", 1)[1]
+    key = callback.data.split(":", 1)[1]
+    diet_map = {"none": "Без ограничений", "keto": "Кето", "vegan": "Веган", "vegetarian": "Вегетарианская", "lowcarb": "Низкоуглеводная"}
+    diet = diet_map.get(key, key)
     await update_user_prefs(callback.from_user.id, diet=diet)
     await callback.answer(f"Диета сохранена: {diet}")
-    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.")
+    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
 
 @router.callback_query(F.data.startswith("set_allergies:"))
 async def set_allergies(callback: types.CallbackQuery):
-    value = callback.data.split(":", 1)[1]
+    key = callback.data.split(":", 1)[1]
+    allergies_map = {"none": "Нет", "nuts": "Орехи", "dairy": "Молочка", "gluten": "Глютен", "seafood": "Морепродукты"}
+    value = allergies_map.get(key, key)
     await update_user_prefs(callback.from_user.id, allergies=value)
     await callback.answer(f"Аллергии сохранены: {value}")
-    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.")
+    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
 
 @router.callback_query(F.data.startswith("set_dislikes:"))
 async def set_dislikes(callback: types.CallbackQuery):
-    value = callback.data.split(":", 1)[1]
+    key = callback.data.split(":", 1)[1]
+    dislikes_map = {"none": "Нет", "onion": "Лук", "fish": "Рыба", "broccoli": "Брокколи", "garlic": "Чеснок"}
+    value = dislikes_map.get(key, key)
     await update_user_prefs(callback.from_user.id, dislikes=value)
     await callback.answer(f"Нелюбимые сохранены: {value}")
-    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.")
+    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
 
 @router.callback_query(F.data.startswith("set_skill:"))
 async def set_skill(callback: types.CallbackQuery):
-    skill = callback.data.split(":", 1)[1]
+    key = callback.data.split(":", 1)[1]
+    skill_map = {"beginner": "Новичок", "intermediate": "Средний", "advanced": "Продвинутый"}
+    skill = skill_map.get(key, key)
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень сохранён: {skill}")
-    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.")
+    await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
 
 def format_recipe(recipe: dict) -> str:
     text = (
