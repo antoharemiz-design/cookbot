@@ -106,7 +106,10 @@ async def delete_favorite(callback: types.CallbackQuery):
     StateFilter(None),
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "📅 Меню на неделю",
-        "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню"
+        "⚙️ Профиль", "❓ Помощь", "🔙 Главное меню",
+        # Блокируем возможные кнопки профиля, чтобы точно не попали в генератор
+        "Без ограничений", "Кето", "Веган", "Вегетарианская", "Низкоуглеводная",
+        "Новичок", "Средний", "Продвинутый", "Пропустить"
     ]
 )
 async def generate_recipe(message: types.Message):
