@@ -42,7 +42,6 @@ skip_kb = ReplyKeyboardMarkup(
     one_time_keyboard=True
 )
 
-# Главное меню (чтобы сразу вернуть после профиля)
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт")],
