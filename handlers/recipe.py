@@ -6,17 +6,23 @@ from services.ai import get_recipe
 from database.db import (
     add_favorite, get_favorites, remove_favorite,
     set_last_recipe, get_last_recipe, get_user_prefs, update_user_prefs,
-    add_subscriber, remove_subscriber, get_all_subscribers, add_rating
+    add_subscriber, remove_subscriber, get_all_subscribers, add_rating,
+    add_cook_log, get_cook_log, get_or_create_quest, complete_quest,
+    check_and_grant_achievements, get_user_achievements, get_cooked_count,
+    grant_achievement, ACHIEVEMENTS
 )
+import logging
 
 router = Router()
+logging.basicConfig(level=logging.INFO)
 
-# Главное меню (профессиональный вид)
+# Главное меню (добавлены Дневник и Статистика)
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🍳 Придумать рецепт"), KeyboardButton(text="⭐ Мои избранные")],
+        [KeyboardButton(text="📖 Дневник"), KeyboardButton(text="🏆 Статистика")],
         [KeyboardButton(text="🔔 Блюдо дня"), KeyboardButton(text="⚙️ Настройки")],
-        [KeyboardButton(text="ℹ️ О боте")]
+        [KeyboardButton(text="🗡 Квест дня"), KeyboardButton(text="ℹ️ О боте")]
     ],
     resize_keyboard=True,
     input_field_placeholder="Что хотите приготовить?"
@@ -36,7 +42,8 @@ async def cmd_start(message: types.Message):
         "• Придумывать рецепты из твоих продуктов\n"
         "• Учитывать диету, аллергии и предпочтения\n"
         "• Сохранять любимые рецепты\n"
-        "• Присылать блюдо дня\n\n"
+        "• Присылать блюдо дня\n"
+        "• Давать ежедневные задания и награды 🏆\n\n"
         "Чтобы я знал твои вкусы, нажми <b>⚙️ Настройки</b> или просто напиши, что есть в холодильнике!\n"
         "<i>Например: курица, лук, сметана, гречка</i>",
         parse_mode="HTML",
@@ -58,7 +65,6 @@ async def show_favorites(message: types.Message):
     if not favs:
         await message.answer("У вас пока нет избранных рецептов.", reply_markup=main_kb)
         return
-
     builder = InlineKeyboardBuilder()
     for i, rec in enumerate(favs):
         title = rec.get('title', f'Рецепт {i+1}')
@@ -77,7 +83,6 @@ async def view_favorite(callback: types.CallbackQuery):
     if index >= len(favs):
         await callback.answer("Рецепт не найден.", show_alert=True)
         return
-
     recipe = favs[index]
     text = format_recipe(recipe)
     builder = InlineKeyboardBuilder()
@@ -100,10 +105,11 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# Генератор рецептов (реагирует только на текстовые запросы, не занятые кнопками)
+# Генератор рецептов
 @router.message(
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
-        "🍳 Придумать рецепт", "⭐ Мои избранные", "🔔 Блюдо дня", "⚙️ Настройки", "ℹ️ О боте"
+        "🍳 Придумать рецепт", "⭐ Мои избранные", "📖 Дневник", "🏆 Статистика",
+        "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня", "ℹ️ О боте"
     ]
 )
 async def generate_recipe(message: types.Message):
@@ -111,9 +117,7 @@ async def generate_recipe(message: types.Message):
     if len(user_input) < 3:
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
         return
-
     await message.answer("👨‍🍳 Готовлю рецепт...")
-
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
     if prefs:
@@ -125,21 +129,21 @@ async def generate_recipe(message: types.Message):
             extra += f"Не любит: {prefs['dislikes']}. "
         if prefs.get("skill"):
             extra += f"Уровень готовки: {prefs['skill']}. "
-
     recipe, raw_response = await get_recipe(user_input, extra_context=extra)
-
     if recipe is None:
         if raw_response == "RATE_LIMIT":
             await message.answer("⏳ Слишком много запросов. Попробуйте через минуту.")
         else:
-            await message.answer(
-                "😔 Не удалось создать рецепт. Попробуйте изменить запрос.",
-                parse_mode="HTML"
-            )
+            await message.answer("😔 Не удалось создать рецепт. Попробуйте изменить запрос.")
         return
-
+    # Сохраняем в last_recipe, cook_log
     await set_last_recipe(message.from_user.id, recipe)
-
+    await add_cook_log(message.from_user.id, recipe)
+    # Проверяем квест
+    quest = await get_or_create_quest(message.from_user.id)
+    quest_completed_today = quest["completed"]
+    # Проверяем достижения
+    new_ach = await check_and_grant_achievements(message.from_user.id)
     response_text = format_recipe(recipe)
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -151,6 +155,9 @@ async def generate_recipe(message: types.Message):
         InlineKeyboardButton(text="👎", callback_data=f"rate:{recipe['title']}:0")
     )
     await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
+    # Если квест не выполнен, напомним
+    if not quest_completed_today:
+        await message.answer(f"📌 <b>Квест дня:</b> {quest['description']}\nНажми <b>🗡 Квест дня</b> после выполнения, чтобы получить баллы!", parse_mode="HTML")
 
 @router.callback_query(F.data == "save_last")
 async def save_last_recipe(callback: types.CallbackQuery):
@@ -174,6 +181,61 @@ async def handle_rate(callback: types.CallbackQuery):
     else:
         await callback.answer()
 
+@router.message(F.text == "📖 Дневник")
+async def show_diary(message: types.Message):
+    log = await get_cook_log(message.from_user.id, limit=5)
+    if not log:
+        await message.answer("Ваш дневник пуст. Приготовьте что-нибудь!")
+        return
+    text = "<b>📖 Последние приготовленные блюда:</b>\n\n"
+    for rec in log:
+        title = rec.get('title', 'Без названия')
+        text += f"• {title}\n"
+    await message.answer(text, parse_mode="HTML")
+
+@router.message(F.text == "🏆 Статистика")
+async def show_stats(message: types.Message):
+    count = await get_cooked_count(message.from_user.id)
+    achievements = await get_user_achievements(message.from_user.id)
+    ach_text = "\n".join([f"{a['icon']} {a['name']} – {a['desc']}" for a in achievements]) if achievements else "Нет достижений"
+    level = "Новичок"
+    if count >= 10:
+        level = "Шеф"
+    elif count >= 5:
+        level = "Умелец"
+    text = (
+        f"🏆 <b>Ваш уровень:</b> {level}\n"
+        f"🍳 Приготовлено блюд: <b>{count}</b>\n\n"
+        f"<b>Достижения:</b>\n{ach_text}"
+    )
+    await message.answer(text, parse_mode="HTML")
+
+@router.message(F.text == "🗡 Квест дня")
+async def quest_command(message: types.Message):
+    quest = await get_or_create_quest(message.from_user.id)
+    if quest["completed"]:
+        await message.answer("🎉 Вы уже выполнили сегодняшний квест! Приходите завтра за новым.")
+    else:
+        await message.answer(
+            f"🗡 <b>Квест дня:</b> {quest['description']}\n\n"
+            "Как только приготовите подходящее блюдо, нажмите кнопку ниже.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Я выполнил!", callback_data="complete_quest")]
+            ])
+        )
+
+@router.callback_query(F.data == "complete_quest")
+async def complete_quest_callback(callback: types.CallbackQuery):
+    quest = await get_or_create_quest(callback.from_user.id)
+    if quest["completed"]:
+        await callback.answer("Квест уже выполнен.", show_alert=True)
+        return
+    await complete_quest(callback.from_user.id)
+    # Начисляем бонусные баллы (просто отмечаем)
+    await callback.answer("Квест выполнен! +50 очков!", show_alert=True)
+    await callback.message.answer("🎉 Отлично! Вы заработали бонусные очки. Завтра ждите новый квест.")
+
 @router.message(F.text == "🔔 Блюдо дня")
 async def toggle_daily(message: types.Message):
     subs = await get_all_subscribers()
@@ -186,7 +248,7 @@ async def toggle_daily(message: types.Message):
 
 @router.message(F.text == "⚙️ Настройки")
 async def settings_button(message: types.Message):
-    await set_prefs_start(message)  # Прямой вызов той же функции, что и команда /setprefs
+    await set_prefs_start(message)
 
 @router.message(F.text == "ℹ️ О боте")
 async def about_bot(message: types.Message):
@@ -202,11 +264,6 @@ async def about_bot(message: types.Message):
         parse_mode="HTML",
         reply_markup=main_kb
     )
-
-@router.message(Command("help"))
-@router.message(F.text == "❓ Помощь")  # на случай, если кто-то вручную вводит
-async def help_cmd(message: types.Message):
-    await about_bot(message)
 
 # ---------- /setprefs ----------
 @router.message(Command("setprefs"))
