@@ -44,27 +44,47 @@ def make_main_kb(user_id: int):
     )
 
 # ---------- Вспомогательные функции ----------
+def safe_str(value) -> str:
+    """Безопасно приводит значение к строке."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    return ""
+
 def format_recipe(recipe: dict) -> str:
+    title = safe_str(recipe.get('title', 'Блюдо'))
+    time = safe_str(recipe.get('cooking_time', 'не указано'))
+    difficulty = safe_str(recipe.get('difficulty', 'не указана'))
+    ingredients = [safe_str(ing) for ing in recipe.get('ingredients', [])]
+    steps = [safe_str(step) for step in recipe.get('steps', [])]
+    tip = safe_str(recipe.get('tip', ''))
+
     text = (
-        f"🍽 <b>{recipe.get('title', 'Блюдо')}</b>\n"
-        f"⏱ Время: {recipe.get('cooking_time', 'не указано')}\n"
-        f"📊 Сложность: {recipe.get('difficulty', 'не указана')}\n\n"
-        f"<b>Ингредиенты:</b>\n" + "\n".join(f"• {ing}" for ing in recipe.get('ingredients', [])) + "\n\n"
-        f"<b>Приготовление:</b>\n" + "\n".join(f"{i+1}. {step}" for i, step in enumerate(recipe.get('steps', [])))
+        f"🍽 <b>{title}</b>\n"
+        f"⏱ Время: {time}\n"
+        f"📊 Сложность: {difficulty}\n\n"
+        f"<b>Ингредиенты:</b>\n" + "\n".join(f"• {ing}" for ing in ingredients) + "\n\n"
+        f"<b>Приготовление:</b>\n" + "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
     )
-    if recipe.get('tip'):
-        text += f"\n\n💡 <i>Совет: {recipe['tip']}</i>"
+    if tip:
+        text += f"\n\n💡 <i>Совет: {tip}</i>"
     return text
 
 def match_quest(recipe: dict, quest_type: str) -> bool:
-    title = recipe.get("title", "").lower()
-    ingredients = [ing.lower() for ing in recipe.get("ingredients", [])]
-    cooking_time_str = recipe.get("cooking_time", "").lower()
+    title = safe_str(recipe.get("title", "")).lower()
+    ingredients = [safe_str(ing).lower() for ing in recipe.get("ingredients", [])]
+    # Извлекаем минуты из cooking_time (может быть строкой или числом)
+    raw_time = recipe.get("cooking_time", "")
+    if isinstance(raw_time, str):
+        cooking_time_str = raw_time.lower()
+    else:
+        cooking_time_str = str(raw_time)
     minutes = 999
     match = re.search(r'(\d+)\s*мин', cooking_time_str)
     if match:
         minutes = int(match.group(1))
-    if minutes == 999:
+    else:
         numbers = re.findall(r'\d+', cooking_time_str)
         if numbers:
             minutes = min(map(int, numbers))
@@ -165,7 +185,7 @@ async def show_favorites(message: types.Message):
     builder = InlineKeyboardBuilder()
     for i, rec in enumerate(favs):
         title = rec.get('title', f'Рецепт {i+1}')
-        short_title = title[:30] + '…' if len(title) > 30 else title
+        short_title = safe_str(title)[:30] + '…' if len(safe_str(title)) > 30 else safe_str(title)
         builder.row(InlineKeyboardButton(
             text=short_title,
             callback_data=f"view_fav:{i}"
@@ -195,7 +215,7 @@ async def delete_favorite(callback: types.CallbackQuery):
         await callback.answer("Рецепт уже удалён.", show_alert=True)
         return
     title = favs[index].get('title', '')
-    success = await remove_favorite(callback.from_user.id, title)
+    success = await remove_favorite(callback.from_user.id, safe_str(title))
     if success:
         await callback.answer("Удалено!", show_alert=True)
         await callback.message.delete()
@@ -216,7 +236,6 @@ async def generate_recipe(message: types.Message):
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
         return
 
-    # Расширенные триггеры холодильника
     fridge_triggers = [
         "из холодильника", "что приготовить из холодильника",
         "что есть в холодильнике", "из моих продуктов",
@@ -269,8 +288,9 @@ async def generate_recipe(message: types.Message):
         bonus_earned = True
 
     if not await has_achievement(message.from_user.id, "fast_chef"):
-        cooking_time = recipe.get("cooking_time", "")
-        match = re.search(r'(\d+)\s*мин', cooking_time.lower())
+        raw_time = recipe.get("cooking_time", "")
+        cooking_time = safe_str(raw_time).lower()
+        match = re.search(r'(\d+)\s*мин', cooking_time)
         if match:
             mins = int(match.group(1))
             if mins <= 15:
@@ -282,7 +302,7 @@ async def generate_recipe(message: types.Message):
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="⭐ В избранное", callback_data="save_last"),
-        InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=recipe.get("title", ""))
+        InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=safe_str(recipe.get("title", "")))
     )
     builder.row(
         InlineKeyboardButton(text="👍", callback_data="rate:1"),
@@ -324,7 +344,7 @@ async def handle_rate(callback: types.CallbackQuery):
         return
     rating = int(rating_str)
     title = recipe.get("title", "Без названия")
-    await add_rating(callback.from_user.id, title, rating)
+    await add_rating(callback.from_user.id, safe_str(title), rating)
     emoji = "👍" if rating else "👎"
     await callback.answer(f"Спасибо за оценку! {emoji}", show_alert=False)
     await callback.message.edit_reply_markup(reply_markup=None)
@@ -379,7 +399,6 @@ async def fridge_delete(callback: types.CallbackQuery):
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
-# Обработчик сообщения в состоянии ожидания продукта
 @router.message(FridgeAdd.waiting_for_product, F.text)
 async def process_fridge_product(message: types.Message, state: FSMContext):
     text = message.text.strip().lower()
@@ -407,7 +426,7 @@ async def show_diary(message: types.Message):
     text = "<b>📖 Последние приготовленные блюда:</b>\n\n"
     for rec in log:
         title = rec.get('title', 'Без названия')
-        text += f"• {title}\n"
+        text += f"• {safe_str(title)}\n"
     await message.answer(text, parse_mode="HTML")
 
 # ---------- Статистика ----------
@@ -419,15 +438,12 @@ async def show_stats(message: types.Message):
     completed_quests = await get_completed_quests_count(message.from_user.id)
 
     level = "Новичок"
-    next_level = "Умелец"
     points_needed = 50
     if score >= 100:
         level = "Шеф"
-        next_level = "Мастер-шеф"
         points_needed = 200
     elif score >= 50:
         level = "Умелец"
-        next_level = "Шеф"
         points_needed = 100
 
     progress = min(score / points_needed * 100, 100) if points_needed > 0 else 100
@@ -595,14 +611,15 @@ async def inline_recipe(inline_query: types.InlineQuery):
     if recipe is None:
         return
 
-    title = recipe.get("title", "Рецепт")
-    time = recipe.get("cooking_time", "? мин")
-    description = f"⏱ {time} | {recipe.get('difficulty', '')}"
-    ingredients = "\n".join(f"• {ing}" for ing in recipe.get("ingredients", []))
-    steps = "\n".join(f"{i+1}. {step}" for i, step in enumerate(recipe.get("steps", [])))
+    title = safe_str(recipe.get("title", "Рецепт"))
+    time = safe_str(recipe.get("cooking_time", "? мин"))
+    description = f"⏱ {time} | {safe_str(recipe.get('difficulty', ''))}"
+    ingredients = "\n".join(f"• {safe_str(ing)}" for ing in recipe.get("ingredients", []))
+    steps = "\n".join(f"{i+1}. {safe_str(step)}" for i, step in enumerate(recipe.get("steps", [])))
     full_text = f"🍽 <b>{title}</b>\n⏱ {time}\n\n<b>Ингредиенты:</b>\n{ingredients}\n\n<b>Приготовление:</b>\n{steps}"
-    if recipe.get("tip"):
-        full_text += f"\n\n💡 {recipe['tip']}"
+    tip = safe_str(recipe.get("tip", ""))
+    if tip:
+        full_text += f"\n\n💡 {tip}"
 
     input_content = InputTextMessageContent(full_text, parse_mode="HTML")
     result_id = hashlib.md5(query.encode()).hexdigest()
