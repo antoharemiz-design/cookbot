@@ -25,8 +25,12 @@ import hashlib
 router = Router()
 logging.basicConfig(level=logging.INFO)
 
+# Состояния
 class FridgeAdd(StatesGroup):
     waiting_for_product = State()
+
+class PlanWaiting(StatesGroup):
+    waiting_for_prefs = State()
 
 # ---------- Главное меню ----------
 def make_main_kb(user_id: int):
@@ -41,6 +45,14 @@ def make_main_kb(user_id: int):
         ],
         resize_keyboard=True,
         input_field_placeholder="Что хотите приготовить?"
+    )
+
+def plan_waiting_kb():
+    """Клавиатура на время ожидания пожеланий к плану."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🚫 Без пожеланий")]],
+        resize_keyboard=True,
+        one_time_keyboard=True
     )
 
 # ---------- Вспомогательные функции ----------
@@ -476,6 +488,8 @@ async def process_fridge_product(message: types.Message, state: FSMContext):
         added.append(p)
     await message.answer(f"✅ Добавлено в холодильник: {', '.join(added)}")
     await state.clear()
+    # Возвращаем главное меню
+    await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
 
 # ---------- Дневник ----------
 @router.message(F.text == "📖 Дневник")
@@ -568,16 +582,49 @@ async def about_bot(message: types.Message):
         reply_markup=make_main_kb(message.from_user.id)
     )
 
-# ---------- Кнопки планировщика ----------
+# ---------- Планировщик с запросом предпочтений ----------
 @router.message(F.text == "📅 План на день")
-async def plan_day_button(message: types.Message):
-    await generate_plan(message, "day")
+async def plan_day_button(message: types.Message, state: FSMContext):
+    await state.set_state(PlanWaiting.waiting_for_prefs)
+    await state.update_data(period="day")
+    await message.answer(
+        "📅 <b>План на день</b>\n\n"
+        "Напишите ваши пожелания (например, <i>без рыбы, больше овощей</i>) или нажмите <b>«🚫 Без пожеланий»</b>.",
+        parse_mode="HTML",
+        reply_markup=plan_waiting_kb()
+    )
 
 @router.message(F.text == "📅 План на неделю")
-async def plan_week_button(message: types.Message):
-    await generate_plan(message, "week")
+async def plan_week_button(message: types.Message, state: FSMContext):
+    await state.set_state(PlanWaiting.waiting_for_prefs)
+    await state.update_data(period="week")
+    await message.answer(
+        "📅 <b>План на неделю</b>\n\n"
+        "Напишите ваши пожелания (например, <i>без рыбы, больше овощей</i>) или нажмите <b>«🚫 Без пожеланий»</b>.",
+        parse_mode="HTML",
+        reply_markup=plan_waiting_kb()
+    )
 
-# ---------- Команда /plan ----------
+@router.message(PlanWaiting.waiting_for_prefs, F.text == "🚫 Без пожеланий")
+async def plan_no_prefs(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    period = data.get("period", "day")
+    await state.clear()
+    await generate_plan(message, period)
+    # Возвращаем главное меню
+    await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
+
+@router.message(PlanWaiting.waiting_for_prefs, F.text)
+async def plan_with_prefs(message: types.Message, state: FSMContext):
+    preferences = message.text.strip()
+    data = await state.get_data()
+    period = data.get("period", "day")
+    await state.clear()
+    await generate_plan(message, period, preferences)
+    # Возвращаем главное меню
+    await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
+
+# Команда /plan тоже использует generate_plan напрямую (без запроса предпочтений)
 @router.message(Command("plan"))
 async def plan_command(message: types.Message):
     args = message.text.split()
