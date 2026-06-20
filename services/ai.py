@@ -35,7 +35,7 @@ async def get_recipe(products: str, extra_context: str = "") -> tuple[dict | Non
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.7,
-            max_tokens=3000
+            max_tokens=4000
         )
         content = response.choices[0].message.content
         recipe = extract_json(content)
