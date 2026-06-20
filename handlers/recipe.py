@@ -213,21 +213,32 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
 
     # --- Если запрошен конкретный день или одиночный день ---
     if specific_day or period == "day":
-        day_names = [specific_day] if specific_day else ["Сегодня"]
+        if specific_day:
+            day_names = [specific_day]
+        else:
+            # Для коллекций (base_prompt) не принуждаем к "Сегодня", оставляем пустой список
+            day_names = [] if base_prompt else ["Сегодня"]
+
         prompts = []
-        for day in day_names:
-            if base_prompt:
-                prompt = base_prompt + " " + extra
-            else:
-                prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
-                prompt += extra
+        if base_prompt:
+            # Используем готовый промпт, день уже содержится в нём
+            prompt = base_prompt + " " + extra
             prompt += (
-                'Шаги приготовления должны быть краткими (не более 4 шагов). '
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
                 '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
             )
             prompts.append(prompt)
+        else:
+            for day in day_names:
+                prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+                prompt += extra
+                prompt += (
+                    'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
+                    '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
+                    '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
+                )
+                prompts.append(prompt)
         await process_prompts(message, prompts)
 
     # --- Если запрошена неделя ---
@@ -241,7 +252,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                 prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
                 prompt += extra
             prompt += (
-                'Шаги приготовления должны быть краткими (не более 4 шагов). '
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
                 '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
@@ -255,7 +265,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         else:
             prompt = f"Составь меню на {period} (завтрак, обед, ужин). " + extra
         prompt += (
-            'Шаги приготовления должны быть краткими (не более 4 шагов). '
             'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
             '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
             '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
@@ -743,9 +752,11 @@ async def plan_week_button(message: types.Message):
 @router.callback_query(F.data.startswith("collection:"))
 async def handle_collection(callback: types.CallbackQuery):
     key = callback.data.split(":")[1]
-    prompt = COLLECTION_PROMPTS.get(key, "Составь меню на один день.")
+    base_prompt = COLLECTION_PROMPTS.get(key, "Составь меню на один день.")
+    # Добавляем жёсткое требование одного дня, чтобы модель не плодила лишние
+    prompt = base_prompt + " Верни JSON ровно с одним днём (без названия дня или с названием темы)."
     await callback.message.answer("📅 Генерирую тематическое меню...")
-    await generate_plan(callback.message, "day", preferences=prompt, silent=True)  # ← добавил silent
+    await generate_plan(callback.message, "day", preferences=prompt, silent=True)
     await callback.answer()
     
 # Обработчик нажатия на день недели
