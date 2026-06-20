@@ -23,6 +23,17 @@ import re
 import hashlib
 import asyncio
 
+COLLECTION_PROMPTS = {
+    "new_year": "Составь меню на один день в стиле новогоднего стола. Блюда должны быть праздничными, с традиционными новогодними ингредиентами (оливье, мандарины, шампанское и т.д.).",
+    "vegan_week": "Составь веганское меню на один день (завтрак, обед, ужин). Все блюда должны быть без мяса, рыбы, яиц и молочных продуктов.",
+    "fast_breakfast": "Составь меню на один день, где каждый завтрак, обед и ужин готовятся не дольше 15 минут.",
+    "italian_dinner": "Составь меню на один день в итальянском стиле (паста, ризотто, брускетты, тирамису и т.д.).",
+    "kids": "Составь детское меню на один день (завтрак, обед, ужин). Блюда должны нравиться детям, быть простыми и безопасными.",
+    "soups": "Составь меню на один день, состоящее из разных супов (завтрак — лёгкий суп, обед — сытный, ужин — суп-пюре или холодный).",
+    "meat": "Составь меню на один день с акцентом на мясные блюда (стейки, котлеты, гуляш и т.д.).",
+    "asian": "Составь меню на один день в азиатском стиле (суши, вок, том-ям, лапша и т.д.).",
+}
+
 router = Router()
 logging.basicConfig(level=logging.INFO)
 
@@ -46,6 +57,7 @@ def make_main_kb(user_id: int):
             [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🗡 Квест дня")],
             [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")],
             [KeyboardButton(text="ℹ️ О боте")]
+            [KeyboardButton(text="🎯 Коллекции")]
         ],
         resize_keyboard=True,
         input_field_placeholder="Что хотите приготовить?"
@@ -164,6 +176,7 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     """
     Генерирует меню на день или неделю.
     Если period == "week", генерирует отдельно для каждого дня (7 запросов).
+    Если preferences начинается с "Составь меню", используется как базовый промпт (для коллекций).
     """
     if not silent:
         if specific_day:
@@ -174,7 +187,7 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
             display_name = period
         await message.answer(f"📅 Генерирую меню на {display_name}...")
 
-    # Собираем контекст (профиль, холодильник) – он одинаков для всех дней
+    # Собираем контекст (профиль, холодильник)
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
     if prefs:
@@ -186,20 +199,29 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
             extra += f"Не любит: {prefs['dislikes']}. "
         if prefs.get("skill"):
             extra += f"Уровень готовки: {prefs['skill']}. "
-    if preferences:
+    if preferences and not preferences.startswith("Составь меню"):
         extra += f"Дополнительные пожелания: {preferences}. "
 
     fridge_products = await get_fridge(message.from_user.id)
     if fridge_products:
         extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
 
+    # Проверяем, является ли preferences готовым промптом
+    if preferences and preferences.startswith("Составь меню"):
+        base_prompt = preferences
+    else:
+        base_prompt = None
+
     # --- Если запрошен конкретный день или одиночный день ---
     if specific_day or period == "day":
         day_names = [specific_day] if specific_day else ["Сегодня"]
         prompts = []
         for day in day_names:
-            prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
-            prompt += extra
+            if base_prompt:
+                prompt = base_prompt + " " + extra
+            else:
+                prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+                prompt += extra
             prompt += (
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
@@ -213,8 +235,11 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         days_of_week = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
         prompts = []
         for day in days_of_week:
-            prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
-            prompt += extra
+            if base_prompt:
+                prompt = base_prompt + " " + extra
+            else:
+                prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+                prompt += extra
             prompt += (
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
@@ -224,11 +249,16 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         await process_prompts(message, prompts)
     else:
         # На всякий случай – одиночный день по названию
-        prompts = [f"Составь меню на {period} (завтрак, обед, ужин). " + extra +
-                   'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
-                   '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
-                   '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }']
-        await process_prompts(message, prompts)
+        if base_prompt:
+            prompt = base_prompt + " " + extra
+        else:
+            prompt = f"Составь меню на {period} (завтрак, обед, ужин). " + extra
+        prompt += (
+            'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
+            '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
+            '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
+        )
+        await process_prompts(message, [prompt])
 
 
 async def process_prompts(message: types.Message, prompts: list[str]):
@@ -651,6 +681,21 @@ async def toggle_daily(message: types.Message):
 async def settings_button(message: types.Message):
     await set_prefs_start(message)
 
+# ---------- Планировщик меню ----------
+@router.message(F.text == "🎯 Коллекции")
+async def collections_menu(message: types.Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎄 Новогодний стол", callback_data="collection:new_year")],
+        [InlineKeyboardButton(text="🥗 Веганская неделя", callback_data="collection:vegan_week")],
+        [InlineKeyboardButton(text="⏱️ Завтраки за 15 минут", callback_data="collection:fast_breakfast")],
+        [InlineKeyboardButton(text="🍝 Итальянский ужин", callback_data="collection:italian_dinner")],
+        [InlineKeyboardButton(text="🧒 Детское меню", callback_data="collection:kids")],
+        [InlineKeyboardButton(text="🍲 Супы со всего мира", callback_data="collection:soups")],
+        [InlineKeyboardButton(text="🥩 Мясные блюда", callback_data="collection:meat")],
+        [InlineKeyboardButton(text="🍣 Азиатская кухня", callback_data="collection:asian")],
+    ])
+    await message.answer("🎯 <b>Тематические коллекции</b>\n\nВыберите подборку, и я составлю меню на день:", parse_mode="HTML", reply_markup=kb)
+
 # ---------- О боте ----------
 @router.message(F.text == "ℹ️ О боте")
 async def about_bot(message: types.Message):
@@ -693,6 +738,14 @@ async def plan_week_button(message: types.Message):
         reply_markup=builder.as_markup()
     )
 
+@router.callback_query(F.data.startswith("collection:"))
+async def handle_collection(callback: types.CallbackQuery):
+    key = callback.data.split(":")[1]
+    prompt = COLLECTION_PROMPTS.get(key, "Составь меню на один день.")
+    await callback.message.answer("📅 Генерирую тематическое меню...")
+    await generate_plan(callback.message, "day", preferences=prompt)
+    await callback.answer()
+    
 # Обработчик нажатия на день недели
 @router.callback_query(F.data.startswith("plan_day:"))
 async def plan_specific_day(callback: types.CallbackQuery, state: FSMContext):
