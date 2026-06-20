@@ -160,18 +160,11 @@ async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[
     return await get_recipe(user_input, extra_context=extra)
 
 # ---------- Общая функция планировщика ----------
-async def generate_plan(message: types.Message, period: str, preferences: str = "", specific_day: str = None):
-    if specific_day:
-        # Генерация на один конкретный день
-        await message.answer(f"📅 Генерирую меню на {specific_day}...")
-        prompt = f"Составь меню на {specific_day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+async def generate_plan(message: types.Message, period: str, preferences: str = ""):
+    if period in ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]:
+        await message.answer(f"📅 Генерирую меню на {period}...")
     else:
-        if period == "day":
-            await message.answer(f"📅 Генерирую меню на день...")
-            prompt = "Составь меню на один день (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
-        else:
-            await message.answer(f"📅 Генерирую меню на неделю...")
-            prompt = "Составь меню на неделю (понедельник, вторник, среда, четверг, пятница, суббота, воскресенье). Для каждого дня предложи завтрак, обед и ужин с полноценными рецептами. "
+        await message.answer(f"📅 Генерирую меню на {'день' if period == 'day' else 'неделю'}...")
 
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
@@ -191,6 +184,13 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     if fridge_products:
         extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
 
+    if period in ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]:
+        prompt = f"Составь меню на {period} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+    elif period == "day":
+        prompt = "Составь меню на один день (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+    else:
+        prompt = "Составь меню на неделю (понедельник, вторник, среда, четверг, пятница, суббота, воскресенье). Для каждого дня предложи завтрак, обед и ужин с полноценными рецептами. "
+
     prompt += extra
     prompt += (
         'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
@@ -201,7 +201,8 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     recipe, raw_response = await get_recipe(prompt)
 
     if recipe is None:
-        await message.answer("😔 Не удалось сгенерировать меню. Попробуйте позже.")
+        debug_text = f"<pre>{safe_str(raw_response)[:2000]}</pre>" if raw_response else "нет ответа"
+        await message.answer(f"😔 Не удалось сгенерировать меню.\n\nОтвет модели:\n{debug_text}", parse_mode="HTML")
         return
 
     try:
@@ -235,16 +236,39 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                     day_text += f"🍽 <i>{meal_type}</i>: (нет данных)\n"
             await message.answer(day_text, parse_mode="HTML")
 
-        # Список покупок
+        # Генерация чистого списка покупок
         if all_ingredients:
             cleaned = []
+            # Словарь для нормализации окончаний (падежи → именительный)
+            normalize = {
+                "помидора": "помидор", "помидоры": "помидоры",
+                "огурца": "огурец", "огурцы": "огурцы",
+                "яйца": "яйца", "яйцо": "яйцо",
+                "картофелины": "картофель", "картофеля": "картофель",
+                "луковицы": "лук", "луковица": "лук",
+                "чеснока": "чеснок", "чеснок": "чеснок",
+                "базилика": "базилик", "базилик": "базилик",
+                "зелени": "зелень", "зелень": "зелень",
+                "рыбы": "рыба", "рыба": "рыба",
+                "курицы": "курица", "курица": "курица",
+                "говядины": "говядина", "говядина": "говядина",
+                "свинины": "свинина", "свинина": "свинина",
+            }
             for ing in all_ingredients:
+                # Удаляем всё в скобках
                 ing = re.sub(r'\([^)]*\)', '', ing)
-                ing = re.sub(r'\d+[\s,]*(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|пуч|щеп|по вкусу)?', '', ing)
-                ing = re.sub(r'[\/\.\-\d]+', '', ing)
+                # Удаляем числа и единицы измерения, оставляя только текст
+                ing = re.sub(r'\d+[\s,]*', '', ing)
+                ing = re.sub(r'\b(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|пуч|щеп|по вкусу|зубчик|зубчика|веточка|веточки|пучок|пучка|щепотка|щепотки)\b', '', ing, flags=re.IGNORECASE)
+                # Удаляем знаки препинания и лишние пробелы
+                ing = re.sub(r'[\/\.\,\-\d]+', ' ', ing)
                 ing = ing.strip()
+                # Нормализуем окончания
+                ing = normalize.get(ing, ing)
                 if ing and len(ing) > 1:
                     cleaned.append(ing)
+
+            # Уникальные и отсортированные
             unique = sorted(set(cleaned))
             if unique:
                 shop_text = "🛒 <b>Список покупок:</b>\n" + "\n".join(f"• {i}" for i in unique)
