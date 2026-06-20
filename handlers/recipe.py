@@ -222,6 +222,7 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                 prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
                 prompt += extra
             prompt += (
+                'Шаги приготовления должны быть краткими (не более 4 шагов). '
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
                 '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
@@ -240,6 +241,7 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                 prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
                 prompt += extra
             prompt += (
+                'Шаги приготовления должны быть краткими (не более 4 шагов). '
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
                 '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
@@ -253,6 +255,7 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         else:
             prompt = f"Составь меню на {period} (завтрак, обед, ужин). " + extra
         prompt += (
+            'Шаги приготовления должны быть краткими (не более 4 шагов). '
             'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
             '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
             '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
