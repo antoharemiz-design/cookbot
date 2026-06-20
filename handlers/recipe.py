@@ -742,7 +742,7 @@ async def handle_collection(callback: types.CallbackQuery):
     key = callback.data.split(":")[1]
     prompt = COLLECTION_PROMPTS.get(key, "Составь меню на один день.")
     await callback.message.answer("📅 Генерирую тематическое меню...")
-    await generate_plan(callback.message, "day", preferences=prompt)
+    await generate_plan(callback.message, "day", preferences=prompt, silent=True)  # ← добавил silent
     await callback.answer()
     
 # Обработчик нажатия на день недели
