@@ -1,5 +1,7 @@
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardButton, InlineKeyboardMarkup,
@@ -22,6 +24,10 @@ import hashlib
 
 router = Router()
 logging.basicConfig(level=logging.INFO)
+
+# Состояние для добавления продукта в холодильник
+class FridgeAdd(StatesGroup):
+    waiting_for_product = State()
 
 # ---------- Главное меню ----------
 def make_main_kb(user_id: int):
@@ -196,21 +202,9 @@ async def delete_favorite(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка удаления.", show_alert=True)
 
-# ---------- Обработчик ответа для холодильника (ВАЖНО: до генератора рецептов) ----------
-@router.message(F.reply_to_message)
-async def handle_reply_for_fridge(message: types.Message):
-    if message.reply_to_message.text and "Напишите название продукта" in message.reply_to_message.text:
-        product = message.text.strip().lower()
-        if not product:
-            await message.answer("Вы не ввели продукт. Попробуйте ещё раз.")
-            return
-        await add_to_fridge(message.from_user.id, product)
-        await message.answer(f"✅ {product} добавлен в холодильник!")
-    # Если это не ответ на добавление, ничего не делаем – сообщение пойдёт дальше
-    # и попадёт в генератор рецептов, что нормально для других случаев.
-
-# ---------- Генератор рецептов ----------
+# ---------- Генератор рецептов (теперь защищён StateFilter(None)) ----------
 @router.message(
+    StateFilter(None),   # не срабатывает, если активно какое-либо состояние (например, добавление в холодильник)
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🧊 Мой холодильник", "📖 Дневник",
         "🏆 Статистика", "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня", "ℹ️ О боте"
@@ -222,7 +216,6 @@ async def generate_recipe(message: types.Message):
         await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
         return
 
-    # Запрос из холодильника
     if user_input.lower() in ["из холодильника", "что приготовить из холодильника"]:
         products = await get_fridge(message.from_user.id)
         if not products:
@@ -340,12 +333,9 @@ async def fridge_menu(message: types.Message):
     await message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "fridge_add")
-async def fridge_add_prompt(callback: types.CallbackQuery):
-    await callback.message.answer(
-        "Напишите название продукта, который хотите добавить (например: помидор).\n"
-        "<i>Для добавления ответьте на это сообщение.</i>",
-        parse_mode="HTML"
-    )
+async def fridge_add_prompt(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Напишите название продукта:")
+    await state.set_state(FridgeAdd.waiting_for_product)
     await callback.answer()
 
 @router.callback_query(F.data == "fridge_remove")
@@ -376,6 +366,17 @@ async def fridge_delete(callback: types.CallbackQuery):
         InlineKeyboardButton(text="❌ Удалить", callback_data="fridge_remove")
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+# Хендлер, который ловит сообщение в состоянии ожидания продукта
+@router.message(FridgeAdd.waiting_for_product, F.text)
+async def process_fridge_product(message: types.Message, state: FSMContext):
+    product = message.text.strip().lower()
+    if not product:
+        await message.answer("Вы не ввели продукт. Попробуйте ещё раз.")
+        return
+    await add_to_fridge(message.from_user.id, product)
+    await message.answer(f"✅ {product} добавлен в холодильник!")
+    await state.clear()
 
 # ---------- Дневник ----------
 @router.message(F.text == "📖 Дневник")
