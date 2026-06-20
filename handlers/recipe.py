@@ -1,4 +1,3 @@
-import asyncio
 from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -22,6 +21,7 @@ from database.db import (
 import logging
 import re
 import hashlib
+import asyncio
 
 router = Router()
 logging.basicConfig(level=logging.INFO)
@@ -32,6 +32,9 @@ class FridgeAdd(StatesGroup):
 
 class PlanWaiting(StatesGroup):
     waiting_for_prefs = State()
+
+class WeekDaySelect(StatesGroup):
+    waiting_for_day = State()
 
 # ---------- Главное меню ----------
 def make_main_kb(user_id: int):
@@ -49,9 +52,24 @@ def make_main_kb(user_id: int):
     )
 
 def plan_waiting_kb():
-    """Клавиатура на время ожидания пожеланий к плану."""
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🚫 Без пожеланий")]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+def week_days_kb():
+    """Клавиатура для выбора дня недели."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Понедельник")],
+            [KeyboardButton(text="Вторник")],
+            [KeyboardButton(text="Среда")],
+            [KeyboardButton(text="Четверг")],
+            [KeyboardButton(text="Пятница")],
+            [KeyboardButton(text="Суббота")],
+            [KeyboardButton(text="Воскресенье")]
+        ],
         resize_keyboard=True,
         one_time_keyboard=True
     )
@@ -142,8 +160,18 @@ async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[
     return await get_recipe(user_input, extra_context=extra)
 
 # ---------- Общая функция планировщика ----------
-async def generate_plan(message: types.Message, period: str, preferences: str = ""):
-    await message.answer(f"📅 Генерирую меню на {'день' if period == 'day' else 'неделю'}...")
+async def generate_plan(message: types.Message, period: str, preferences: str = "", specific_day: str = None):
+    if specific_day:
+        # Генерация на один конкретный день
+        await message.answer(f"📅 Генерирую меню на {specific_day}...")
+        prompt = f"Составь меню на {specific_day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+    else:
+        if period == "day":
+            await message.answer(f"📅 Генерирую меню на день...")
+            prompt = "Составь меню на один день (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+        else:
+            await message.answer(f"📅 Генерирую меню на неделю...")
+            prompt = "Составь меню на неделю (понедельник, вторник, среда, четверг, пятница, суббота, воскресенье). Для каждого дня предложи завтрак, обед и ужин с полноценными рецептами. "
 
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
@@ -163,11 +191,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     if fridge_products:
         extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
 
-    if period == "day":
-        prompt = "Составь меню на один день (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
-    else:
-        prompt = "Составь меню на неделю (понедельник, вторник, среда, четверг, пятница, суббота, воскресенье). Для каждого дня предложи завтрак, обед и ужин с полноценными рецептами. "
-
     prompt += extra
     prompt += (
         'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
@@ -175,20 +198,10 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
     )
 
-    # Пытаемся до 3 раз, если модель возвращает None или невалидный JSON
-    recipe = None
-    raw_response = None
-    for attempt in range(3):
-        recipe, raw_response = await get_recipe(prompt)
-        if recipe is not None:
-            break
-        # При отказе можно немного изменить промпт, но для простоты просто повторяем
-        await asyncio.sleep(1)  # даём API передохнуть
+    recipe, raw_response = await get_recipe(prompt)
 
     if recipe is None:
-        # Показываем сырой ответ, чтобы понять причину
-        debug_text = f"<pre>{safe_str(raw_response)[:2000]}</pre>" if raw_response else "нет ответа"
-        await message.answer(f"😔 Не удалось сгенерировать меню после нескольких попыток.\n\nОтвет модели:\n{debug_text}", parse_mode="HTML")
+        await message.answer("😔 Не удалось сгенерировать меню. Попробуйте позже.")
         return
 
     try:
@@ -222,15 +235,12 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                     day_text += f"🍽 <i>{meal_type}</i>: (нет данных)\n"
             await message.answer(day_text, parse_mode="HTML")
 
-        # Генерация чистого списка покупок
+        # Список покупок
         if all_ingredients:
             cleaned = []
             for ing in all_ingredients:
-                # Удаляем всё, что в скобках
                 ing = re.sub(r'\([^)]*\)', '', ing)
-                # Удаляем числа и единицы измерения
                 ing = re.sub(r'\d+[\s,]*(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|пуч|щеп|по вкусу)?', '', ing)
-                # Удаляем оставшиеся числа и лишние символы
                 ing = re.sub(r'[\/\.\-\d]+', '', ing)
                 ing = ing.strip()
                 if ing and len(ing) > 1:
@@ -522,7 +532,6 @@ async def process_fridge_product(message: types.Message, state: FSMContext):
         added.append(p)
     await message.answer(f"✅ Добавлено в холодильник: {', '.join(added)}")
     await state.clear()
-    # Возвращаем главное меню
     await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
 
 # ---------- Дневник ----------
@@ -616,7 +625,7 @@ async def about_bot(message: types.Message):
         reply_markup=make_main_kb(message.from_user.id)
     )
 
-# ---------- Планировщик с запросом предпочтений ----------
+# ---------- Планировщик ----------
 @router.message(F.text == "📅 План на день")
 async def plan_day_button(message: types.Message, state: FSMContext):
     await state.set_state(PlanWaiting.waiting_for_prefs)
@@ -630,22 +639,37 @@ async def plan_day_button(message: types.Message, state: FSMContext):
 
 @router.message(F.text == "📅 План на неделю")
 async def plan_week_button(message: types.Message, state: FSMContext):
-    await state.set_state(PlanWaiting.waiting_for_prefs)
+    await state.set_state(WeekDaySelect.waiting_for_day)
     await state.update_data(period="week")
     await message.answer(
         "📅 <b>План на неделю</b>\n\n"
-        "Напишите ваши пожелания (например, <i>без рыбы, больше овощей</i>) или нажмите <b>«🚫 Без пожеланий»</b>.",
+        "Выберите день недели, на который составить меню:",
+        reply_markup=week_days_kb()
+    )
+
+# Обработчик выбора дня недели
+@router.message(WeekDaySelect.waiting_for_day, F.text.in_(
+    ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+))
+async def week_day_selected(message: types.Message, state: FSMContext):
+    day = message.text
+    await state.update_data(specific_day=day)
+    await state.set_state(PlanWaiting.waiting_for_prefs)
+    await message.answer(
+        f"📅 <b>План на {day}</b>\n\n"
+        "Напишите ваши пожелания или нажмите <b>«🚫 Без пожеланий»</b>.",
         parse_mode="HTML",
         reply_markup=plan_waiting_kb()
     )
 
+# Обработчики пожеланий
 @router.message(PlanWaiting.waiting_for_prefs, F.text == "🚫 Без пожеланий")
 async def plan_no_prefs(message: types.Message, state: FSMContext):
     data = await state.get_data()
     period = data.get("period", "day")
+    specific_day = data.get("specific_day")
     await state.clear()
-    await generate_plan(message, period)
-    # Возвращаем главное меню
+    await generate_plan(message, period, specific_day=specific_day)
     await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
 
 @router.message(PlanWaiting.waiting_for_prefs, F.text)
@@ -653,12 +677,12 @@ async def plan_with_prefs(message: types.Message, state: FSMContext):
     preferences = message.text.strip()
     data = await state.get_data()
     period = data.get("period", "day")
+    specific_day = data.get("specific_day")
     await state.clear()
-    await generate_plan(message, period, preferences)
-    # Возвращаем главное меню
+    await generate_plan(message, period, preferences, specific_day)
     await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
 
-# Команда /plan тоже использует generate_plan напрямую (без запроса предпочтений)
+# Команда /plan
 @router.message(Command("plan"))
 async def plan_command(message: types.Message):
     args = message.text.split()
