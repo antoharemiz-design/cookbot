@@ -185,6 +185,8 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         if not days:
             raise ValueError("Пустое меню")
 
+        all_ingredients = []  # собираем ингредиенты для общего списка
+
         for day in days:
             day_name = day.get("day", "День")
             meals = day.get("meals", [])
@@ -203,9 +205,28 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                     day_text += f"🍽 <i>{meal_type}</i>: <b>{title}</b>\n"
                     day_text += f"⏱ {time} | {diff}\n"
                     day_text += f"Ингредиенты: {ingr_text}\n\n"
+
+                    # Собираем все ингредиенты для покупок
+                    all_ingredients.extend([safe_str(i).lower() for i in ingredients])
                 else:
                     day_text += f"🍽 <i>{meal_type}</i>: (нет данных)\n"
             await message.answer(day_text, parse_mode="HTML")
+
+        # Выдаём общий список покупок
+        if all_ingredients:
+            # Простая нормализация: убираем цифры, лишние пробелы, сортируем
+            import re
+            cleaned = []
+            for ing in all_ingredients:
+                # Удаляем количества в скобках и пр.
+                ing_clean = re.sub(r'\d+\s*(г|кг|мл|л|ст\.л|ч\.л|шт|зуб|пуч|щеп|по вкусу)?', '', ing).strip()
+                if ing_clean:
+                    cleaned.append(ing_clean)
+            # Уникальные, отсортированные
+            unique_ingredients = sorted(set(cleaned))
+            shop_text = "🛒 <b>Список покупок:</b>\n" + "\n".join(f"• {i}" for i in unique_ingredients)
+            await message.answer(shop_text, parse_mode="HTML")
+
     except Exception as e:
         await message.answer(
             f"Меню сгенерировано, но не удалось отобразить:\n<pre>{raw_response[:3000]}</pre>",
