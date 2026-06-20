@@ -25,7 +25,6 @@ import hashlib
 router = Router()
 logging.basicConfig(level=logging.INFO)
 
-# Состояние для добавления продукта в холодильник
 class FridgeAdd(StatesGroup):
     waiting_for_product = State()
 
@@ -59,7 +58,6 @@ def format_recipe(recipe: dict) -> str:
     ingredients = [safe_str(ing) for ing in recipe.get('ingredients', [])]
     steps = [safe_str(step) for step in recipe.get('steps', [])]
     tip = safe_str(recipe.get('tip', ''))
-
     text = (
         f"🍽 <b>{title}</b>\n"
         f"⏱ Время: {time}\n"
@@ -75,10 +73,7 @@ def match_quest(recipe: dict, quest_type: str) -> bool:
     title = safe_str(recipe.get("title", "")).lower()
     ingredients = [safe_str(ing).lower() for ing in recipe.get("ingredients", [])]
     raw_time = recipe.get("cooking_time", "")
-    if isinstance(raw_time, str):
-        cooking_time_str = raw_time.lower()
-    else:
-        cooking_time_str = str(raw_time)
+    cooking_time_str = raw_time.lower() if isinstance(raw_time, str) else str(raw_time)
     minutes = 999
     match = re.search(r'(\d+)\s*мин', cooking_time_str)
     if match:
@@ -133,16 +128,84 @@ async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[
     user_input = ", ".join(products)
     return await get_recipe(user_input, extra_context=extra)
 
+# ---------- Общая функция планировщика ----------
+async def generate_plan(message: types.Message, period: str, preferences: str = ""):
+    await message.answer(f"📅 Генерирую меню на {'день' if period == 'day' else 'неделю'}...")
+
+    prefs = await get_user_prefs(message.from_user.id)
+    extra = ""
+    if prefs:
+        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
+            extra += f"Диета: {prefs['diet']}. "
+        if prefs.get("allergies") and prefs["allergies"] != "Нет":
+            extra += f"Аллергии: {prefs['allergies']}. "
+        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
+            extra += f"Не любит: {prefs['dislikes']}. "
+        if prefs.get("skill"):
+            extra += f"Уровень готовки: {prefs['skill']}. "
+    if preferences:
+        extra += f"Дополнительные пожелания: {preferences}. "
+
+    fridge_products = await get_fridge(message.from_user.id)
+    if fridge_products:
+        extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
+
+    if period == "day":
+        prompt = "Составь меню на один день (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
+    else:
+        prompt = "Составь меню на неделю (понедельник, вторник, среда, четверг, пятница, суббота, воскресенье). Для каждого дня предложи завтрак, обед и ужин с полноценными рецептами. "
+
+    prompt += extra
+    prompt += (
+        'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
+        '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
+        '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
+    )
+
+    recipe, raw_response = await get_recipe(prompt)
+
+    if recipe is None:
+        await message.answer("😔 Не удалось сгенерировать меню. Попробуйте позже.")
+        return
+
+    try:
+        days = recipe.get("days", [])
+        if not days:
+            raise ValueError("Пустое меню")
+
+        for day in days:
+            day_name = day.get("day", "День")
+            meals = day.get("meals", [])
+            day_text = f"<b>{day_name}</b>\n\n"
+            for meal in meals:
+                meal_type = meal.get("type", "Приём пищи")
+                rec = meal.get("recipe", {})
+                if rec:
+                    title = safe_str(rec.get("title", "Блюдо"))
+                    time = safe_str(rec.get("cooking_time", "?"))
+                    diff = safe_str(rec.get("difficulty", ""))
+                    ingredients = rec.get("ingredients", [])
+                    ingr_text = ", ".join([safe_str(i) for i in ingredients[:5]])
+                    if len(ingredients) > 5:
+                        ingr_text += "..."
+                    day_text += f"🍽 <i>{meal_type}</i>: <b>{title}</b>\n"
+                    day_text += f"⏱ {time} | {diff}\n"
+                    day_text += f"Ингредиенты: {ingr_text}\n\n"
+                else:
+                    day_text += f"🍽 <i>{meal_type}</i>: (нет данных)\n"
+            await message.answer(day_text, parse_mode="HTML")
+    except Exception as e:
+        await message.answer(
+            f"Меню сгенерировано, но не удалось отобразить:\n<pre>{raw_response[:3000]}</pre>",
+            parse_mode="HTML"
+        )
+
 # ---------- Команды и кнопки ----------
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     prefs = await get_user_prefs(message.from_user.id)
     name = prefs.get("name") if prefs else None
-    if name:
-        greeting = f"👋 С возвращением, {name}!"
-    else:
-        greeting = "👋 Добро пожаловать в CookBot!"
-
+    greeting = f"👋 С возвращением, {name}!" if name else "👋 Добро пожаловать в CookBot!"
     quest = await get_or_create_quest(message.from_user.id)
     quest_text = ""
     if not quest["completed"]:
@@ -186,10 +249,7 @@ async def show_favorites(message: types.Message):
     for i, rec in enumerate(favs):
         title = rec.get('title', f'Рецепт {i+1}')
         short_title = safe_str(title)[:30] + '…' if len(safe_str(title)) > 30 else safe_str(title)
-        builder.row(InlineKeyboardButton(
-            text=short_title,
-            callback_data=f"view_fav:{i}"
-        ))
+        builder.row(InlineKeyboardButton(text=short_title, callback_data=f"view_fav:{i}"))
     builder.adjust(1)
     await message.answer("⭐ <b>Ваши избранные рецепты</b> (нажмите для деталей):", parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -227,7 +287,8 @@ async def delete_favorite(callback: types.CallbackQuery):
     StateFilter(None),
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🧊 Мой холодильник", "📖 Дневник",
-        "🏆 Статистика", "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня", "📅 План", "ℹ️ О боте"
+        "🏆 Статистика", "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня",
+        "📅 План на день", "📅 План на неделю", "ℹ️ О боте"
     ]
 )
 async def generate_recipe(message: types.Message):
@@ -507,7 +568,16 @@ async def about_bot(message: types.Message):
         reply_markup=make_main_kb(message.from_user.id)
     )
 
-# ---------- Планировщик меню ----------
+# ---------- Кнопки планировщика ----------
+@router.message(F.text == "📅 План на день")
+async def plan_day_button(message: types.Message):
+    await generate_plan(message, "day")
+
+@router.message(F.text == "📅 План на неделю")
+async def plan_week_button(message: types.Message):
+    await generate_plan(message, "week")
+
+# ---------- Команда /plan ----------
 @router.message(Command("plan"))
 async def plan_command(message: types.Message):
     args = message.text.split()
@@ -521,168 +591,6 @@ async def plan_command(message: types.Message):
             preferences = " ".join(args[1:])
     await generate_plan(message, period, preferences)
 
-    await message.answer(f"📅 Генерирую меню на {'день' if period == 'day' else 'неделю'}...")
-
-    # Собираем контекст
-    prefs = await get_user_prefs(message.from_user.id)
-    extra = ""
-    if prefs:
-        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
-            extra += f"Диета: {prefs['diet']}. "
-        if prefs.get("allergies") and prefs["allergies"] != "Нет":
-            extra += f"Аллергии: {prefs['allergies']}. "
-        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
-            extra += f"Не любит: {prefs['dislikes']}. "
-        if prefs.get("skill"):
-            extra += f"Уровень готовки: {prefs['skill']}. "
-    if preferences:
-        extra += f"Дополнительные пожелания: {preferences}. "
-
-    fridge_products = await get_fridge(message.from_user.id)
-    if fridge_products:
-        extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
-
-    # Формируем промпт
-    if period == "day":
-        prompt = "Составь меню на один день (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
-    else:
-        prompt = "Составь меню на неделю (понедельник, вторник, среда, четверг, пятница, суббота, воскресенье). Для каждого дня предложи завтрак, обед и ужин с полноценными рецептами. "
-
-    prompt += extra
-    prompt += (
-        'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
-        '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
-        '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
-    )
-
-    recipe, raw_response = await get_recipe(prompt)
-
-    if recipe is None:
-        await message.answer("😔 Не удалось сгенерировать меню. Попробуйте позже.")
-        return
-
-    try:
-        days = recipe.get("days", [])
-        if not days:
-            raise ValueError("Пустое меню")
-
-        for day in days:
-            day_name = day.get("day", "День")
-            meals = day.get("meals", [])
-            day_text = f"<b>{day_name}</b>\n\n"
-            for meal in meals:
-                meal_type = meal.get("type", "Приём пищи")
-                rec = meal.get("recipe", {})
-                if rec:
-                    title = safe_str(rec.get("title", "Блюдо"))
-                    time = safe_str(rec.get("cooking_time", "?"))
-                    diff = safe_str(rec.get("difficulty", ""))
-                    ingredients = rec.get("ingredients", [])
-                    ingr_text = ", ".join([safe_str(i) for i in ingredients[:5]])
-                    if len(ingredients) > 5:
-                        ingr_text += "..."
-                    day_text += f"🍽 <i>{meal_type}</i>: <b>{title}</b>\n"
-                    day_text += f"⏱ {time} | {diff}\n"
-                    day_text += f"Ингредиенты: {ingr_text}\n\n"
-                else:
-                    day_text += f"🍽 <i>{meal_type}</i>: (нет данных)\n"
-            await message.answer(day_text, parse_mode="HTML")
-    except Exception as e:
-        await message.answer(
-            f"Меню сгенерировано, но не удалось отобразить:\n<pre>{raw_response[:3000]}</pre>",
-            parse_mode="HTML"
-        )
-
-@router.message(F.text == "📅 План")
-async def plan_button(message: types.Message):
-    await message.answer(
-        "🍽️ <b>Планировщик меню</b>\n\n"
-        "• <code>/plan day</code> — меню на сегодня (завтрак, обед, ужин)\n"
-        "• <code>/plan week</code> — меню на неделю\n"
-        "• Можно добавить пожелания: <code>/plan week без рыбы, больше овощей</code>",
-        parse_mode="HTML"
-    )
-
-async def generate_plan(message: types.Message, period: str, preferences: str = ""):
-    await message.answer(f"📅 Генерирую меню на {'день' if period == 'day' else 'неделю'}...")
-
-    prefs = await get_user_prefs(message.from_user.id)
-    extra = ""
-    if prefs:
-        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
-            extra += f"Диета: {prefs['diet']}. "
-        if prefs.get("allergies") and prefs["allergies"] != "Нет":
-            extra += f"Аллергии: {prefs['allergies']}. "
-        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
-            extra += f"Не любит: {prefs['dislikes']}. "
-        if prefs.get("skill"):
-            extra += f"Уровень готовки: {prefs['skill']}. "
-    if preferences:
-        extra += f"Дополнительные пожелания: {preferences}. "
-
-    fridge_products = await get_fridge(message.from_user.id)
-    if fridge_products:
-        extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
-
-    if period == "day":
-        prompt = "Составь меню на один день (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
-    else:
-        prompt = "Составь меню на неделю (понедельник, вторник, среда, четверг, пятница, суббота, воскресенье). Для каждого дня предложи завтрак, обед и ужин с полноценными рецептами. "
-
-    prompt += extra
-    prompt += (
-        'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
-        '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
-        '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
-    )
-
-    recipe, raw_response = await get_recipe(prompt)
-
-    if recipe is None:
-        await message.answer("😔 Не удалось сгенерировать меню. Попробуйте позже.")
-        return
-
-    try:
-        days = recipe.get("days", [])
-        if not days:
-            raise ValueError("Пустое меню")
-
-        for day in days:
-            day_name = day.get("day", "День")
-            meals = day.get("meals", [])
-            day_text = f"<b>{day_name}</b>\n\n"
-            for meal in meals:
-                meal_type = meal.get("type", "Приём пищи")
-                rec = meal.get("recipe", {})
-                if rec:
-                    title = safe_str(rec.get("title", "Блюдо"))
-                    time = safe_str(rec.get("cooking_time", "?"))
-                    diff = safe_str(rec.get("difficulty", ""))
-                    ingredients = rec.get("ingredients", [])
-                    ingr_text = ", ".join([safe_str(i) for i in ingredients[:5]])
-                    if len(ingredients) > 5:
-                        ingr_text += "..."
-                    day_text += f"🍽 <i>{meal_type}</i>: <b>{title}</b>\n"
-                    day_text += f"⏱ {time} | {diff}\n"
-                    day_text += f"Ингредиенты: {ingr_text}\n\n"
-                else:
-                    day_text += f"🍽 <i>{meal_type}</i>: (нет данных)\n"
-            await message.answer(day_text, parse_mode="HTML")
-    except Exception as e:
-        await message.answer(
-            f"Меню сгенерировано, но не удалось отобразить:\n<pre>{raw_response[:3000]}</pre>",
-            parse_mode="HTML"
-        )
-
-@router.message(F.text == "📅 План на день")
-async def plan_day_button(message: types.Message):
-    # Вызываем ту же логику, что и /plan day
-    await generate_plan(message, "day")
-
-@router.message(F.text == "📅 План на неделю")
-async def plan_week_button(message: types.Message):
-    await generate_plan(message, "week")
-    
 # ---------- /setprefs ----------
 @router.message(Command("setprefs"))
 async def set_prefs_start(message: types.Message):
