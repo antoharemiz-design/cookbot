@@ -99,20 +99,106 @@ def match_quest(recipe: dict, quest_type: str) -> bool:
         return any(c in title for c in cuisines)
     return False
 
-async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[dict | None, str | None]:
-    prefs = await get_user_prefs(user_id)
-    extra = ""
-    if prefs:
-        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
-            extra += f"Диета: {prefs['diet']}. "
-        if prefs.get("allergies") and prefs["allergies"] != "Нет":
-            extra += f"Аллергии: {prefs['allergies']}. "
-        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
-            extra += f"Не любит: {prefs['dislikes']}. "
-        if prefs.get("skill"):
-            extra += f"Уровень готовки: {prefs['skill']}. "
-    user_input = ", ".join(products)
-    return await get_recipe(user_input, extra_context=extra)
+# ---------- Генератор рецептов (защищён StateFilter(None)) ----------
+@router.message(
+    StateFilter(None),
+    lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
+        "🍳 Придумать рецепт", "⭐ Мои избранные", "🧊 Мой холодильник", "📖 Дневник",
+        "🏆 Статистика", "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня", "ℹ️ О боте"
+    ]
+)
+async def generate_recipe(message: types.Message):
+    user_input = message.text.strip()
+    if len(user_input) < 3:
+        await message.answer("Пожалуйста, напиши хотя бы пару продуктов или запрос.")
+        return
+
+    # Расширенный список фраз, которые означают "использовать холодильник"
+    fridge_triggers = [
+        "из холодильника", "что приготовить из холодильника",
+        "что есть в холодильнике", "из моих продуктов",
+        "из того что есть", "приготовь из холодильника",
+        "готовь из холодильника", "блюдо из холодильника",
+        "что можно приготовить из холодильника", "используй холодильник",
+        "из того, что в холодильнике", "из имеющихся продуктов",
+        "из продуктов в холодильнике", "из доступных продуктов"
+    ]
+    # Проверка вхождения любой из фраз
+    use_fridge = any(trigger in user_input.lower() for trigger in fridge_triggers)
+
+    if use_fridge:
+        products = await get_fridge(message.from_user.id)
+        if not products:
+            await message.answer("Ваш холодильник пуст. Добавьте продукты через меню «🧊 Мой холодильник».")
+            return
+        await message.answer(f"👨‍🍳 Готовлю рецепт из: {', '.join(products)}...")
+        recipe, raw_response = await generate_recipe_from_list(message.from_user.id, products)
+    else:
+        await message.answer("👨‍🍳 Готовлю рецепт...")
+        prefs = await get_user_prefs(message.from_user.id)
+        extra = ""
+        if prefs:
+            if prefs.get("diet") and prefs["diet"] != "Без ограничений":
+                extra += f"Диета: {prefs['diet']}. "
+            if prefs.get("allergies") and prefs["allergies"] != "Нет":
+                extra += f"Аллергии: {prefs['allergies']}. "
+            if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
+                extra += f"Не любит: {prefs['dislikes']}. "
+            if prefs.get("skill"):
+                extra += f"Уровень готовки: {prefs['skill']}. "
+        recipe, raw_response = await get_recipe(user_input, extra_context=extra)
+
+    if recipe is None:
+        if raw_response == "RATE_LIMIT":
+            await message.answer("⏳ Слишком много запросов. Попробуйте через минуту.")
+        else:
+            await message.answer("😔 Не удалось создать рецепт. Попробуйте изменить запрос.")
+        return
+
+    await set_last_recipe(message.from_user.id, recipe)
+    await add_cook_log(message.from_user.id, recipe)
+    await add_score(message.from_user.id, 10)
+
+    quest = await get_or_create_quest(message.from_user.id)
+    bonus_earned = False
+    if not quest["completed"] and match_quest(recipe, quest["type"]):
+        await complete_quest(message.from_user.id)
+        await add_score(message.from_user.id, 50)
+        bonus_earned = True
+
+    if not await has_achievement(message.from_user.id, "fast_chef"):
+        cooking_time = recipe.get("cooking_time", "")
+        match = re.search(r'(\d+)\s*мин', cooking_time.lower())
+        if match:
+            mins = int(match.group(1))
+            if mins <= 15:
+                await grant_achievement(message.from_user.id, "fast_chef")
+
+    new_achievements = await check_and_grant_achievements(message.from_user.id)
+
+    response_text = format_recipe(recipe)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⭐ В избранное", callback_data="save_last"),
+        InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=recipe.get("title", ""))
+    )
+    builder.row(
+        InlineKeyboardButton(text="👍", callback_data="rate:1"),
+        InlineKeyboardButton(text="👎", callback_data="rate:0")
+    )
+    await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+    notifications = []
+    if bonus_earned:
+        notifications.append("🎉 <b>Квест дня выполнен! +50 очков.</b>")
+    if new_achievements:
+        for ach in new_achievements:
+            notifications.append(f"🏆 Новое достижение: {ach['icon']} {ach['name']} – {ach['desc']}")
+    if not quest["completed"] and not bonus_earned:
+        notifications.append(f"📌 <b>Квест дня:</b> {quest['description']} (не выполнен)")
+
+    if notifications:
+        await message.answer("\n".join(notifications), parse_mode="HTML")
 
 # ---------- Команды и кнопки ----------
 @router.message(Command("start"))
@@ -370,12 +456,23 @@ async def fridge_delete(callback: types.CallbackQuery):
 # Хендлер, который ловит сообщение в состоянии ожидания продукта
 @router.message(FridgeAdd.waiting_for_product, F.text)
 async def process_fridge_product(message: types.Message, state: FSMContext):
-    product = message.text.strip().lower()
-    if not product:
+    text = message.text.strip().lower()
+    if not text:
         await message.answer("Вы не ввели продукт. Попробуйте ещё раз.")
         return
-    await add_to_fridge(message.from_user.id, product)
-    await message.answer(f"✅ {product} добавлен в холодильник!")
+
+    # Разбиваем по запятым, добавляем каждый продукт отдельно
+    products = [p.strip() for p in text.split(",") if p.strip()]
+    if not products:
+        await message.answer("Не удалось распознать продукт.")
+        return
+
+    added = []
+    for p in products:
+        await add_to_fridge(message.from_user.id, p)
+        added.append(p)
+
+    await message.answer(f"✅ Добавлено в холодильник: {', '.join(added)}")
     await state.clear()
 
 # ---------- Дневник ----------
