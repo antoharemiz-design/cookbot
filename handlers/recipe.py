@@ -416,7 +416,7 @@ async def delete_favorite(callback: types.CallbackQuery):
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🧊 Мой холодильник", "📖 Дневник",
         "🏆 Статистика", "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня",
-        "📅 План на день", "📅 План на неделю", "ℹ️ О боте"
+        "📅 План на день", "📅 План на неделю", "🎯 Коллекции", "ℹ️ О боте"
     ]
 )
 async def generate_recipe(message: types.Message):
