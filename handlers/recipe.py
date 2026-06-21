@@ -663,7 +663,8 @@ async def show_stats(message: types.Message):
     bar = "▓" * int(progress // 10) + "░" * (10 - int(progress // 10))
 
     ach_text = "\n".join([f"{a['icon']} {a['name']} – {a['desc']}" for a in achievements]) if achievements else "Нет достижений"
-        # Персональные предпочтения
+
+    # Персональные предпочтения
     taste_prefs = await get_user_prefs(message.from_user.id)
     taste_text = ""
     if taste_prefs:
@@ -671,13 +672,14 @@ async def show_stats(message: types.Message):
         fav_cuisines = json.loads(taste_prefs.get("favorite_cuisines", "{}") or "{}")
         fav_ingredients = json.loads(taste_prefs.get("favorite_ingredients", "{}") or "{}")
         if fav_cuisines or fav_ingredients:
-            taste_text = "\n<b>🍽 Ваши предпочтения:</b>\n"
+            taste_text = "\n\n<b>🍽 Ваши предпочтения:</b>\n"
             if fav_cuisines:
                 sorted_c = sorted(fav_cuisines.items(), key=lambda x: x[1], reverse=True)[:3]
                 taste_text += "Кухни: " + ", ".join(f"{c} ({v})" for c, v in sorted_c) + "\n"
             if fav_ingredients:
                 sorted_i = sorted(fav_ingredients.items(), key=lambda x: x[1], reverse=True)[:5]
                 taste_text += "Ингредиенты: " + ", ".join(f"{i} ({v})" for i, v in sorted_i)
+
     text = (
         f"🏆 <b>Ваш уровень:</b> {level}\n"
         f"⭐ Очки: <b>{score}</b> / {points_needed}\n"
@@ -685,6 +687,7 @@ async def show_stats(message: types.Message):
         f"🍳 Приготовлено блюд: <b>{count}</b>\n"
         f"⚔️ Выполнено квестов: <b>{completed_quests}</b>\n\n"
         f"<b>Достижения:</b>\n{ach_text}"
+        f"{taste_text}"
     )
     await message.answer(text, parse_mode="HTML")
 
