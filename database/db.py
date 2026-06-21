@@ -2,6 +2,7 @@ import aiosqlite
 from pathlib import Path
 from datetime import date
 import random
+import re
 
 DB_PATH = Path(__file__).parent.parent / "cookbot.db"
 
