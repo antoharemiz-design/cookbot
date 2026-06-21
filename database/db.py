@@ -21,18 +21,15 @@ async def init_db():
             )
         """)
 
-        # Получаем список существующих колонок
+        # Добавляем недостающие колонки, игнорируя ошибку дублирования
         cur = await db.execute("PRAGMA table_info(user_prefs)")
         existing_cols = {row[1] for row in await cur.fetchall()}
-
-        # Добавляем недостающие колонки
         for col in EXPECTED_COLUMNS["user_prefs"]:
             if col not in existing_cols:
-                # Проверяем на всякий случай ещё раз, что колонки нет
-                cur = await db.execute("PRAGMA table_info(user_prefs)")
-                cols_now = {row[1] for row in await cur.fetchall()}
-                if col not in cols_now:
+                try:
                     await db.execute(f"ALTER TABLE user_prefs ADD COLUMN {col} TEXT")
+                except:
+                    pass  # колонка уже есть (гонка состояний)
 
         # Остальные таблицы
         await db.execute("""
@@ -365,8 +362,8 @@ async def update_taste_prefs(user_id: int, recipe: dict, rating: int):
     async with aiosqlite.connect(DB_PATH) as db:
         # Загружаем текущие данные
         prefs = await get_user_prefs(user_id) or {}
-        fav_cuisines = json.loads(prefs.get("favorite_cuisines", "{}"))
-        fav_ingredients = json.loads(prefs.get("favorite_ingredients", "{}"))
+        fav_cuisines = json.loads(prefs.get("favorite_cuisines", "{}") or "{}")
+        fav_ingredients = json.loads(prefs.get("favorite_ingredients", "{}") or "{}")
 
         # Обновляем счётчики кухонь
         delta = 1 if rating == 1 else -1
@@ -396,8 +393,8 @@ async def get_taste_summary(user_id: int) -> str:
     """Возвращает текстовую строку с предпочтениями для включения в промпт."""
     import json
     prefs = await get_user_prefs(user_id) or {}
-    fav_cuisines = json.loads(prefs.get("favorite_cuisines", "{}"))
-    fav_ingredients = json.loads(prefs.get("favorite_ingredients", "{}"))
+    fav_cuisines = json.loads(prefs.get("favorite_cuisines", "{}") or "{}")
+    fav_ingredients = json.loads(prefs.get("favorite_ingredients", "{}") or "{}")
 
     parts = []
     if fav_cuisines:
