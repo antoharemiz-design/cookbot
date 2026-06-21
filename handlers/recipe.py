@@ -668,8 +668,8 @@ async def show_stats(message: types.Message):
     taste_text = ""
     if taste_prefs:
         import json
-        fav_cuisines = json.loads(taste_prefs.get("favorite_cuisines", "{}"))
-        fav_ingredients = json.loads(taste_prefs.get("favorite_ingredients", "{}"))
+        fav_cuisines = json.loads(taste_prefs.get("favorite_cuisines", "{}") or "{}")
+        fav_ingredients = json.loads(taste_prefs.get("favorite_ingredients", "{}") or "{}")
         if fav_cuisines or fav_ingredients:
             taste_text = "\n<b>🍽 Ваши предпочтения:</b>\n"
             if fav_cuisines:
