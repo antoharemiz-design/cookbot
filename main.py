@@ -32,7 +32,7 @@ async def main():
     logging.info(f"Health server started on port {port}")
 
     # Планировщик
-    scheduler.add_job(send_daily_recipe, 'cron', hour=10, minute=0, args=[bot])
+    scheduler.add_job(send_daily_recipe, 'cron', hour=6, minute=0, args=[bot])
     scheduler.start()
 
     await bot.delete_webhook(drop_pending_updates=True)
