@@ -6,27 +6,33 @@ import random
 DB_PATH = Path(__file__).parent.parent / "cookbot.db"
 
 EXPECTED_COLUMNS = {
-    "user_prefs": ["user_id", "name", "diet", "allergies", "dislikes", "skill", "score", "favorite_cuisines", "favorite_ingredients"]
+    "user_prefs": [
+        "user_id", "name", "diet", "allergies", "dislikes", "skill",
+        "score", "favorite_cuisines", "favorite_ingredients"
+    ]
 }
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
-        # user_prefs с миграцией
+        # Создаём базовую таблицу user_prefs, если её нет
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_prefs (
                 user_id INTEGER PRIMARY KEY
             )
         """)
+
+        # Получаем список существующих колонок
         cur = await db.execute("PRAGMA table_info(user_prefs)")
         existing_cols = {row[1] for row in await cur.fetchall()}
+
+        # Добавляем недостающие колонки
         for col in EXPECTED_COLUMNS["user_prefs"]:
             if col not in existing_cols:
-                await db.execute(f"ALTER TABLE user_prefs ADD COLUMN {col} TEXT")
-
-                # Добавляем колонки для вкусов, если их нет
-        for col in ["favorite_cuisines", "favorite_ingredients"]:
-            if col not in existing_cols:
-                await db.execute(f"ALTER TABLE user_prefs ADD COLUMN {col} TEXT")
+                # Проверяем на всякий случай ещё раз, что колонки нет
+                cur = await db.execute("PRAGMA table_info(user_prefs)")
+                cols_now = {row[1] for row in await cur.fetchall()}
+                if col not in cols_now:
+                    await db.execute(f"ALTER TABLE user_prefs ADD COLUMN {col} TEXT")
 
         # Остальные таблицы
         await db.execute("""
@@ -79,13 +85,6 @@ async def init_db():
                 user_id INTEGER NOT NULL,
                 achievement_key TEXT NOT NULL,
                 UNIQUE(user_id, achievement_key)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS fridge (
-                user_id INTEGER NOT NULL,
-                product TEXT NOT NULL,
-                UNIQUE(user_id, product)
             )
         """)
         await db.commit()
