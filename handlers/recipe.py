@@ -16,7 +16,8 @@ from database.db import (
     add_cook_log, get_cook_log, get_or_create_quest, complete_quest, is_quest_completed_today,
     check_and_grant_achievements, get_user_achievements, get_cooked_count, get_score, add_score,
     grant_achievement, has_achievement, ACHIEVEMENTS, QUEST_TYPES, get_completed_quests_count,
-    add_to_fridge, remove_from_fridge, get_fridge
+    add_to_fridge, remove_from_fridge, get_fridge,
+    update_taste_prefs, get_taste_summary   # ← вот так
 )
 import logging
 import re
@@ -168,6 +169,10 @@ async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[
         if prefs.get("skill"):
             extra += f"Уровень готовки: {prefs['skill']}. "
     user_input = ", ".join(products)
+        # Добавляем персональные предпочтения
+    taste_summary = await get_taste_summary(message.from_user.id)
+    if taste_summary:
+        extra += taste_summary
     return await get_recipe(user_input, extra_context=extra)
 
 # ---------- Общая функция планировщика ----------
@@ -204,6 +209,10 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     fridge_products = await get_fridge(message.from_user.id)
     if fridge_products:
         extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
+            # Персональные предпочтения
+    taste_summary = await get_taste_summary(message.from_user.id)
+    if taste_summary:
+        extra += taste_summary
 
     # Проверяем, является ли preferences готовым промптом
     if preferences and preferences.startswith("Составь меню"):
@@ -547,6 +556,8 @@ async def handle_rate(callback: types.CallbackQuery):
     title = recipe.get("title", "Без названия")
     await add_rating(callback.from_user.id, safe_str(title), rating)
     emoji = "👍" if rating else "👎"
+            # Обновляем предпочтения пользователя
+    await update_taste_prefs(callback.from_user.id, recipe, rating)
     await callback.answer(f"Спасибо за оценку! {emoji}", show_alert=False)
     await callback.message.edit_reply_markup(reply_markup=None)
 
@@ -652,6 +663,21 @@ async def show_stats(message: types.Message):
     bar = "▓" * int(progress // 10) + "░" * (10 - int(progress // 10))
 
     ach_text = "\n".join([f"{a['icon']} {a['name']} – {a['desc']}" for a in achievements]) if achievements else "Нет достижений"
+        # Персональные предпочтения
+    taste_prefs = await get_user_prefs(message.from_user.id)
+    taste_text = ""
+    if taste_prefs:
+        import json
+        fav_cuisines = json.loads(taste_prefs.get("favorite_cuisines", "{}"))
+        fav_ingredients = json.loads(taste_prefs.get("favorite_ingredients", "{}"))
+        if fav_cuisines or fav_ingredients:
+            taste_text = "\n<b>🍽 Ваши предпочтения:</b>\n"
+            if fav_cuisines:
+                sorted_c = sorted(fav_cuisines.items(), key=lambda x: x[1], reverse=True)[:3]
+                taste_text += "Кухни: " + ", ".join(f"{c} ({v})" for c, v in sorted_c) + "\n"
+            if fav_ingredients:
+                sorted_i = sorted(fav_ingredients.items(), key=lambda x: x[1], reverse=True)[:5]
+                taste_text += "Ингредиенты: " + ", ".join(f"{i} ({v})" for i, v in sorted_i)
     text = (
         f"🏆 <b>Ваш уровень:</b> {level}\n"
         f"⭐ Очки: <b>{score}</b> / {points_needed}\n"
