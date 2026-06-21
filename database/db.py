@@ -335,9 +335,7 @@ async def check_and_grant_achievements(user_id: int):
 
 # ---------- Вкусовые предпочтения ----------
 async def update_taste_prefs(user_id: int, recipe: dict, rating: int):
-    """Обновляет счётчики кухонь и ингредиентов на основе оценки (1 = лайк, 0 = дизлайк)."""
     import json
-    # Извлекаем возможную кухню из названия рецепта
     title = recipe.get("title", "").lower()
     cuisines_found = []
     cuisine_keywords = {
@@ -357,34 +355,40 @@ async def update_taste_prefs(user_id: int, recipe: dict, rating: int):
         if key in title:
             cuisines_found.append(name)
 
-    # Получаем ингредиенты
-    ingredients = [ing.lower().strip() for ing in recipe.get("ingredients", [])]
+    ingredients_raw = [ing.lower().strip() for ing in recipe.get("ingredients", [])]
+    # Глубокая очистка: удаляем числа, единицы измерения, скобки, знаки препинания
+    ingredients_clean = []
+    for ing in ingredients_raw:
+        # Удаляем всё в скобках
+        ing = re.sub(r'\([^)]*\)', '', ing)
+        # Удаляем числа и единицы измерения (г, кг, мл, л, ст.л, ч.л, шт, зубчик и т.д.)
+        ing = re.sub(r'\d+[\s,]*', '', ing)
+        ing = re.sub(r'\b(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|зубчик|пуч|щеп|по вкусу|веточка|пучок|щепотка)\b', '', ing, flags=re.IGNORECASE)
+        # Удаляем оставшиеся знаки препинания и лишние пробелы
+        ing = re.sub(r'[\/\.\,\-\d]+', ' ', ing)
+        ing = ing.strip()
+        if ing and len(ing) > 1:
+            # Простейшая нормализация окончаний
+            ing = ing.replace('курицы', 'курица').replace('лука', 'лук').replace('сметаны', 'сметана')
+            ing = ing.replace('гречки', 'гречка').replace('масла', 'масло').replace('соли', 'соль')
+            ingredients_clean.append(ing)
 
     async with aiosqlite.connect(DB_PATH) as db:
-        # Загружаем текущие данные
         prefs = await get_user_prefs(user_id) or {}
         fav_cuisines = json.loads(prefs.get("favorite_cuisines", "{}") or "{}")
         fav_ingredients = json.loads(prefs.get("favorite_ingredients", "{}") or "{}")
 
-        # Обновляем счётчики кухонь
         delta = 1 if rating == 1 else -1
         for cuisine in cuisines_found:
             fav_cuisines[cuisine] = fav_cuisines.get(cuisine, 0) + delta
             if fav_cuisines[cuisine] <= 0:
                 del fav_cuisines[cuisine]
 
-        # Обновляем счётчики ингредиентов
-        for ing in ingredients:
-            # Простая очистка
-            ing = re.sub(r'\([^)]*\)', '', ing)
-            ing = re.sub(r'\d+[\s,]*', '', ing)
-            ing = re.sub(r'[\/\.\,\-\d]+', ' ', ing).strip()
-            if ing:
-                fav_ingredients[ing] = fav_ingredients.get(ing, 0) + delta
-                if fav_ingredients[ing] <= 0:
-                    del fav_ingredients[ing]
+        for ing in ingredients_clean:
+            fav_ingredients[ing] = fav_ingredients.get(ing, 0) + delta
+            if fav_ingredients[ing] <= 0:
+                del fav_ingredients[ing]
 
-        # Сохраняем
         await update_user_prefs(user_id,
                                 favorite_cuisines=json.dumps(fav_cuisines, ensure_ascii=False),
                                 favorite_ingredients=json.dumps(fav_ingredients, ensure_ascii=False))
