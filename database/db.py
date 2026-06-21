@@ -6,7 +6,7 @@ import random
 DB_PATH = Path(__file__).parent.parent / "cookbot.db"
 
 EXPECTED_COLUMNS = {
-    "user_prefs": ["user_id", "name", "diet", "allergies", "dislikes", "skill", "score"]
+    "user_prefs": ["user_id", "name", "diet", "allergies", "dislikes", "skill", "score", "favorite_cuisines", "favorite_ingredients"]
 }
 
 async def init_db():
@@ -20,6 +20,11 @@ async def init_db():
         cur = await db.execute("PRAGMA table_info(user_prefs)")
         existing_cols = {row[1] for row in await cur.fetchall()}
         for col in EXPECTED_COLUMNS["user_prefs"]:
+            if col not in existing_cols:
+                await db.execute(f"ALTER TABLE user_prefs ADD COLUMN {col} TEXT")
+
+                # Добавляем колонки для вкусов, если их нет
+        for col in ["favorite_cuisines", "favorite_ingredients"]:
             if col not in existing_cols:
                 await db.execute(f"ALTER TABLE user_prefs ADD COLUMN {col} TEXT")
 
@@ -331,4 +336,77 @@ async def check_and_grant_achievements(user_id: int):
         await grant_achievement(user_id, "score_100")
         new_achievements.append(ACHIEVEMENTS["score_100"])
 
+# ---------- Вкусовые предпочтения ----------
+async def update_taste_prefs(user_id: int, recipe: dict, rating: int):
+    """Обновляет счётчики кухонь и ингредиентов на основе оценки (1 = лайк, 0 = дизлайк)."""
+    import json
+    # Извлекаем возможную кухню из названия рецепта
+    title = recipe.get("title", "").lower()
+    cuisines_found = []
+    cuisine_keywords = {
+        "итальянск": "итальянская",
+        "японск": "японская",
+        "мексиканск": "мексиканская",
+        "французск": "французская",
+        "китайск": "китайская",
+        "тайск": "тайская",
+        "индийск": "индийская",
+        "русск": "русская",
+        "украинск": "украинская",
+        "грузинск": "грузинская",
+        "азиатск": "азиатская",
+    }
+    for key, name in cuisine_keywords.items():
+        if key in title:
+            cuisines_found.append(name)
+
+    # Получаем ингредиенты
+    ingredients = [ing.lower().strip() for ing in recipe.get("ingredients", [])]
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Загружаем текущие данные
+        prefs = await get_user_prefs(user_id) or {}
+        fav_cuisines = json.loads(prefs.get("favorite_cuisines", "{}"))
+        fav_ingredients = json.loads(prefs.get("favorite_ingredients", "{}"))
+
+        # Обновляем счётчики кухонь
+        delta = 1 if rating == 1 else -1
+        for cuisine in cuisines_found:
+            fav_cuisines[cuisine] = fav_cuisines.get(cuisine, 0) + delta
+            if fav_cuisines[cuisine] <= 0:
+                del fav_cuisines[cuisine]
+
+        # Обновляем счётчики ингредиентов
+        for ing in ingredients:
+            # Простая очистка
+            ing = re.sub(r'\([^)]*\)', '', ing)
+            ing = re.sub(r'\d+[\s,]*', '', ing)
+            ing = re.sub(r'[\/\.\,\-\d]+', ' ', ing).strip()
+            if ing:
+                fav_ingredients[ing] = fav_ingredients.get(ing, 0) + delta
+                if fav_ingredients[ing] <= 0:
+                    del fav_ingredients[ing]
+
+        # Сохраняем
+        await update_user_prefs(user_id,
+                                favorite_cuisines=json.dumps(fav_cuisines, ensure_ascii=False),
+                                favorite_ingredients=json.dumps(fav_ingredients, ensure_ascii=False))
+
+
+async def get_taste_summary(user_id: int) -> str:
+    """Возвращает текстовую строку с предпочтениями для включения в промпт."""
+    import json
+    prefs = await get_user_prefs(user_id) or {}
+    fav_cuisines = json.loads(prefs.get("favorite_cuisines", "{}"))
+    fav_ingredients = json.loads(prefs.get("favorite_ingredients", "{}"))
+
+    parts = []
+    if fav_cuisines:
+        top_cuisines = sorted(fav_cuisines.items(), key=lambda x: x[1], reverse=True)[:3]
+        parts.append("Любимые кухни: " + ", ".join(f"{c} ({v})" for c, v in top_cuisines))
+    if fav_ingredients:
+        top_ingr = sorted(fav_ingredients.items(), key=lambda x: x[1], reverse=True)[:5]
+        parts.append("Любимые ингредиенты: " + ", ".join(f"{i} ({v})" for i, v in top_ingr))
+    return ". ".join(parts) + ". " if parts else ""
+    
     return new_achievements
