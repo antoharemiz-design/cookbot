@@ -85,6 +85,14 @@ async def init_db():
                 UNIQUE(user_id, achievement_key)
             )
         """)
+                # Таблица для виртуального холодильника
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS fridge (
+                user_id INTEGER NOT NULL,
+                product TEXT NOT NULL,
+                UNIQUE(user_id, product)
+            )
+        """)
         await db.commit()
         
 
