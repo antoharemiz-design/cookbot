@@ -930,12 +930,12 @@ async def start_plan(callback: types.CallbackQuery, state: FSMContext):
 # ---------- Быстрый ужин ----------
 @router.message(F.text == "⏱ Быстрый ужин")
 async def quick_dinner(message: types.Message):
-    await message.answer("👨‍🍳 Ищу быстрый рецепт...")
+    await message.answer("👨‍🍳 Ищу быстрый ужин...")
     fridge_products = await get_fridge(message.from_user.id)
     if fridge_products:
-        user_input = ", ".join(fridge_products) + " приготовь быстрое блюдо до 20 минут"
+        user_input = ", ".join(fridge_products) + " придумай сытный ужин до 20 минут (основное блюдо, не завтрак, не суп)"
     else:
-        user_input = "придумай быстрый ужин до 20 минут из простых продуктов"
+        user_input = "придумай сытный ужин до 20 минут из простых продуктов (основное блюдо, не завтрак, не суп)"
 
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
@@ -952,9 +952,14 @@ async def quick_dinner(message: types.Message):
     if taste_summary:
         extra += taste_summary
 
+    # Защита от повторов: добавим случайный "оттенок"
+    import random
+    variants = ["приготовь", "сделай", "сообрази", "придумай"]
+    user_input = random.choice(variants) + " " + user_input
+
     recipe, raw_response = await get_recipe(user_input, extra_context=extra)
     if recipe is None:
-        await message.answer("😔 Не удалось найти быстрый рецепт. Попробуйте позже.")
+        await message.answer("😔 Не удалось найти быстрый ужин. Попробуйте позже.")
         return
 
     await set_last_recipe(message.from_user.id, recipe)
