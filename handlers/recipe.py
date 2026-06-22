@@ -58,6 +58,7 @@ def make_main_kb(user_id: int):
             [KeyboardButton(text="🏆 Статистика"), KeyboardButton(text="🔔 Блюдо дня")],
             [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🗡 Квест дня")],
             [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")],
+            [KeyboardButton(text="🌍 Вся неделя (чередование)")],
             [KeyboardButton(text="🎯 Коллекции"), KeyboardButton(text="ℹ️ О боте")]
         ],
         resize_keyboard=True,
@@ -359,38 +360,54 @@ async def process_prompts(message: types.Message, prompts: list[str]):
             cleaned = []
             # Расширенный словарь нормализации
             normalize = {
-                "помидора": "помидор", "помидоры": "помидор",
-                "огурца": "огурец", "огурцы": "огурец",
-                "яйца": "яйца", "яйцо": "яйцо",
-                "картофелины": "картофель", "картофеля": "картофель",
+                "помидора": "помидор", "помидоры": "помидор", "помидору": "помидор",
+                "огурца": "огурец", "огурцы": "огурец", "огурцу": "огурец",
+                "яйца": "яйца", "яйцо": "яйцо", "яйцу": "яйцо",
+                "картофелины": "картофель", "картофеля": "картофель", "картофелю": "картофель",
                 "средних картофелины": "картофель",
-                "луковицы": "лук", "луковица": "лук", "лука": "лук",
-                "чеснока": "чеснок", "чеснок": "чеснок",
-                "базилика": "базилик", "базилик": "базилик",
+                "луковицы": "лук", "луковица": "лук", "лука": "лук", "луку": "лук",
+                "чеснока": "чеснок", "чеснок": "чеснок", "чесноку": "чеснок",
+                "базилика": "базилик", "базилик": "базилик", "базилику": "базилик",
                 "зелени": "зелень", "зелень": "зелень",
-                "рыбы": "рыба", "рыба": "рыба",
-                "курицы": "курица", "курица": "курица",
-                "говядины": "говядина", "говядина": "говядина",
-                "свинины": "свинина", "свинина": "свинина",
-                "сыра": "сыр", "сыр": "сыр",
-                "риса": "рис", "рис": "рис",
+                "рыбы": "рыба", "рыба": "рыба", "рыбу": "рыба",
+                "курицы": "курица", "курица": "курица", "курицу": "курица",
+                "говядины": "говядина", "говядина": "говядина", "говядину": "говядина",
+                "свинины": "свинина", "свинина": "свинина", "свинину": "свинина",
+                "сыра": "сыр", "сыр": "сыр", "сыру": "сыр",
+                "риса": "рис", "рис": "рис", "рису": "рис",
                 "моркови": "морковь", "морковь": "морковь",
-                "масла": "масло", "масло": "масло",
+                "масла": "масло", "масло": "масло", "маслу": "масло",
                 "соли": "соль", "соль": "соль",
                 "перца": "перец", "перец": "перец",
                 "воды": "вода", "вода": "вода",
                 "бульона": "бульон", "бульон": "бульон",
                 "муки": "мука", "мука": "мука",
                 "сахара": "сахар", "сахар": "сахар",
+                "стакана": "стакан", "стакан": "стакан",
+                "стаканов": "стакан",
+                "ложки": "ложка", "ложка": "ложка",
+                "ложек": "ложка",
+                "чайная ложка": "чайная ложка",
+                "столовые ложки": "столовая ложка",
+                "грамм": "", "грамма": "", "граммов": "",
+                "кг": "", "г": "", "мл": "", "л": "",
+                "зубчик": "", "зубчика": "", "зубчиков": "",
+                "веточка": "", "веточки": "", "веточек": "",
+                "щепотка": "", "щепотки": "",
+                "по вкусу": "", "средний": "", "большой": "", "маленький": "",
+                "средних": "", "больших": "", "маленьких": "",
+                "для взбивания": "", "размягчённого": "", "ванильного экстракта": "ванильный экстракт",
+                "фрукты для начинки": "фрукты",
+                "шампиньонов": "шампиньоны",
             }
             for ing in all_ingredients:
                 ing = re.sub(r'\([^)]*\)', '', ing)
                 ing = re.sub(r'\d+[\s,]*', '', ing)
-                ing = re.sub(r'\b(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|пуч|щеп|по вкусу|зубчик|зубчика|веточка|веточки|пучок|пучка|щепотка|щепотки|средних|больших|маленьких)\b', '', ing, flags=re.IGNORECASE)
+                ing = re.sub(r'\b(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|пуч|щеп|по вкусу|зубчик|зубчика|веточка|веточки|пучок|пучка|щепотка|щепотки|средних|больших|маленьких|для взбивания|размягчённого)\b', '', ing, flags=re.IGNORECASE)
                 ing = re.sub(r'[\/\.\,\-\d]+', ' ', ing)
                 ing = ing.strip()
                 ing = normalize.get(ing, ing)
-                if ing and len(ing) > 1:
+                if ing and len(ing) > 1 and ing not in ["средний", "большой", "маленький"]:
                     cleaned.append(ing)
 
             unique = sorted(set(cleaned))
@@ -856,16 +873,18 @@ async def plan_day_button(message: types.Message, state: FSMContext):
         reply_markup=plan_waiting_kb()
     )
 
-@router.message(F.text == "📅 План на неделю")
-async def plan_week_button(message: types.Message, state: FSMContext):
+@router.callback_query(F.data.startswith("plan_day:"))
+async def plan_specific_day(callback: types.CallbackQuery, state: FSMContext):
+    day = callback.data.split(":")[1]
     await state.set_state(PlanWaiting.waiting_for_prefs)
-    await state.update_data(period="week")
-    await message.answer(
-        "📅 <b>План на неделю</b>\n\n"
-        "Напишите ваши пожелания (например, <i>без рыбы, больше овощей</i>) или нажмите <b>«🚫 Без пожеланий»</b>.",
+    await state.update_data(period="day", specific_day=day)
+    await callback.message.answer(
+        f"📅 <b>План на {day}</b>\n\n"
+        "Напишите ваши пожелания или нажмите «🚫 Без пожеланий».",
         parse_mode="HTML",
         reply_markup=plan_waiting_kb()
     )
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("collection:"))
 async def handle_collection(callback: types.CallbackQuery):
@@ -889,6 +908,17 @@ async def plan_specific_day(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=plan_waiting_kb()
     )
     await callback.answer()
+
+@router.message(F.text == "🌍 Вся неделя (чередование)")
+async def full_week_button(message: types.Message, state: FSMContext):
+    await state.set_state(PlanWaiting.waiting_for_prefs)
+    await state.update_data(period="week", rotate_cuisines=True)  # сразу включаем чередование
+    await message.answer(
+        "🌍 <b>Вся неделя с чередованием кухонь</b>\n\n"
+        "Напишите ваши пожелания или нажмите «🚫 Без пожеланий».",
+        parse_mode="HTML",
+        reply_markup=plan_waiting_kb()
+    )
 
 # Обработчики пожеланий
 @router.message(PlanWaiting.waiting_for_prefs, F.text == "🚫 Без пожеланий")
@@ -1023,16 +1053,20 @@ async def show_options_message(message: types.Message, state: FSMContext, period
     add_wine = data.get("add_wine", False)
     add_kbju = data.get("add_kbju", False)
     rotate = data.get("rotate_cuisines", False)
+    # Для всей недели кнопка чередования уже включена и не меняется
+    if period == "week" and not rotate:
+        rotate_text = "🌍 Чередовать кухни"
+    else:
+        rotate_text = "✅ Чередовать кухни" if rotate else None
 
     wine_text = "✅ Вино" if add_wine else "🍷 Вино"
     kbju_text = "✅ КБЖУ" if add_kbju else "📊 КБЖУ"
-    rotate_text = "✅ Чередовать кухни" if rotate else "🌍 Чередовать кухни"
 
     buttons = [
         [InlineKeyboardButton(text=wine_text, callback_data="toggle_wine")],
         [InlineKeyboardButton(text=kbju_text, callback_data="toggle_kbju")],
     ]
-    if period == "week":
+    if rotate_text:
         buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
     buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
 
