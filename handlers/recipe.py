@@ -402,52 +402,6 @@ async def cmd_start(message: types.Message):
         reply_markup=make_main_kb(message.from_user.id)
     )
 
-@router.message(F.text == "⏱ Быстрый ужин")
-async def quick_dinner(message: types.Message):
-    await message.answer("👨‍🍳 Ищу быстрый рецепт...")
-    fridge_products = await get_fridge(message.from_user.id)
-    if fridge_products:
-        user_input = ", ".join(fridge_products) + " приготовь быстрое блюдо до 20 минут"
-    else:
-        user_input = "придумай быстрый ужин до 20 минут из простых продуктов"
-
-    prefs = await get_user_prefs(message.from_user.id)
-    extra = ""
-    if prefs:
-        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
-            extra += f"Диета: {prefs['diet']}. "
-        if prefs.get("allergies") and prefs["allergies"] != "Нет":
-            extra += f"Аллергии: {prefs['allergies']}. "
-        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
-            extra += f"Не любит: {prefs['dislikes']}. "
-        if prefs.get("skill"):
-            extra += f"Уровень готовки: {prefs['skill']}. "
-    taste_summary = await get_taste_summary(message.from_user.id)
-    if taste_summary:
-        extra += taste_summary
-
-    recipe, raw_response = await get_recipe(user_input, extra_context=extra)
-    if recipe is None:
-        await message.answer("😔 Не удалось найти быстрый рецепт. Попробуйте позже.")
-        return
-
-    await set_last_recipe(message.from_user.id, recipe)
-
-    response_text = format_recipe(recipe)
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="⭐ В избранное", callback_data="save_last"),
-        InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=safe_str(recipe.get("title", "")))
-    )
-    builder.row(
-        InlineKeyboardButton(text="👍", callback_data="rate:1"),
-        InlineKeyboardButton(text="👎", callback_data="rate:0")
-    )
-    builder.row(
-        InlineKeyboardButton(text="📝 Я приготовил!", callback_data="cook_done")
-    )
-    await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
-
 @router.message(F.text == "🍳 Придумать рецепт")
 async def prompt_products(message: types.Message):
     quest = await get_or_create_quest(message.from_user.id)
@@ -566,24 +520,7 @@ async def generate_recipe(message: types.Message):
 
     await set_last_recipe(message.from_user.id, recipe)
 
-    quest = await get_or_create_quest(message.from_user.id)
-    bonus_earned = False
-    if not quest["completed"] and match_quest(recipe, quest["type"]):
-        await complete_quest(message.from_user.id)
-        await add_score(message.from_user.id, 50)
-        bonus_earned = True
-
-    if not await has_achievement(message.from_user.id, "fast_chef"):
-        raw_time = recipe.get("cooking_time", "")
-        cooking_time = safe_str(raw_time).lower()
-        match = re.search(r'(\d+)\s*мин', cooking_time)
-        if match:
-            mins = int(match.group(1))
-            if mins <= 15:
-                await grant_achievement(message.from_user.id, "fast_chef")
-
-    new_achievements = await check_and_grant_achievements(message.from_user.id)
-
+    # Убрали автоматическое добавление в дневник и очки – теперь через кнопку "Я приготовил!"
     response_text = format_recipe(recipe)
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -597,20 +534,7 @@ async def generate_recipe(message: types.Message):
     builder.row(
         InlineKeyboardButton(text="📝 Я приготовил!", callback_data="cook_done")
     )
-    )
     await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
-
-    notifications = []
-    if bonus_earned:
-        notifications.append("🎉 <b>Квест дня выполнен! +50 очков.</b>")
-    if new_achievements:
-        for ach in new_achievements:
-            notifications.append(f"🏆 Новое достижение: {ach['icon']} {ach['name']} – {ach['desc']}")
-    if not quest["completed"] and not bonus_earned:
-        notifications.append(f"📌 <b>Квест дня:</b> {quest['description']} (не выполнен)")
-
-    if notifications:
-        await message.answer("\n".join(notifications), parse_mode="HTML")
 
 @router.callback_query(F.data == "save_last")
 async def save_last_recipe(callback: types.CallbackQuery):
@@ -639,6 +563,49 @@ async def handle_rate(callback: types.CallbackQuery):
     await update_taste_prefs(callback.from_user.id, recipe, rating)
     emoji = "👍" if rating else "👎"
     await callback.answer(f"Спасибо за оценку! {emoji}", show_alert=False)
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+@router.callback_query(F.data == "cook_done")
+async def mark_as_cooked(callback: types.CallbackQuery):
+    recipe = await get_last_recipe(callback.from_user.id)
+    if recipe is None:
+        await callback.answer("Рецепт не найден.", show_alert=True)
+        return
+
+    await add_cook_log(callback.from_user.id, recipe)
+    await add_score(callback.from_user.id, 10)
+
+    quest = await get_or_create_quest(callback.from_user.id)
+    bonus_earned = False
+    if not quest["completed"] and match_quest(recipe, quest["type"]):
+        await complete_quest(callback.from_user.id)
+        await add_score(callback.from_user.id, 50)
+        bonus_earned = True
+
+    if not await has_achievement(callback.from_user.id, "fast_chef"):
+        raw_time = recipe.get("cooking_time", "")
+        cooking_time = safe_str(raw_time).lower()
+        match = re.search(r'(\d+)\s*мин', cooking_time)
+        if match:
+            mins = int(match.group(1))
+            if mins <= 15:
+                await grant_achievement(callback.from_user.id, "fast_chef")
+
+    new_achievements = await check_and_grant_achievements(callback.from_user.id)
+
+    notifications = []
+    if bonus_earned:
+        notifications.append("🎉 <b>Квест дня выполнен! +50 очков.</b>")
+    if new_achievements:
+        for ach in new_achievements:
+            notifications.append(f"🏆 Новое достижение: {ach['icon']} {ach['name']} – {ach['desc']}")
+    if not quest["completed"] and not bonus_earned:
+        notifications.append(f"📌 <b>Квест дня:</b> {quest['description']} (не выполнен)")
+
+    if notifications:
+        await callback.message.answer("\n".join(notifications), parse_mode="HTML")
+
+    await callback.answer("Записано в дневник! 📖", show_alert=True)
     await callback.message.edit_reply_markup(reply_markup=None)
 
 # ---------- Холодильник ----------
@@ -821,7 +788,7 @@ async def about_bot(message: types.Message):
 # ---------- Планировщик ----------
 @router.message(F.text == "📅 План на день")
 async def plan_day_button(message: types.Message, state: FSMContext):
-    await state.clear()  # очищаем старые данные
+    await state.clear()
     await state.set_state(PlanWaiting.waiting_for_prefs)
     await state.update_data(period="day")
     await message.answer(
@@ -960,6 +927,53 @@ async def start_plan(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Главное меню", reply_markup=make_main_kb(callback.from_user.id))
     await callback.answer()
 
+# ---------- Быстрый ужин ----------
+@router.message(F.text == "⏱ Быстрый ужин")
+async def quick_dinner(message: types.Message):
+    await message.answer("👨‍🍳 Ищу быстрый рецепт...")
+    fridge_products = await get_fridge(message.from_user.id)
+    if fridge_products:
+        user_input = ", ".join(fridge_products) + " приготовь быстрое блюдо до 20 минут"
+    else:
+        user_input = "придумай быстрый ужин до 20 минут из простых продуктов"
+
+    prefs = await get_user_prefs(message.from_user.id)
+    extra = ""
+    if prefs:
+        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
+            extra += f"Диета: {prefs['diet']}. "
+        if prefs.get("allergies") and prefs["allergies"] != "Нет":
+            extra += f"Аллергии: {prefs['allergies']}. "
+        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
+            extra += f"Не любит: {prefs['dislikes']}. "
+        if prefs.get("skill"):
+            extra += f"Уровень готовки: {prefs['skill']}. "
+    taste_summary = await get_taste_summary(message.from_user.id)
+    if taste_summary:
+        extra += taste_summary
+
+    recipe, raw_response = await get_recipe(user_input, extra_context=extra)
+    if recipe is None:
+        await message.answer("😔 Не удалось найти быстрый рецепт. Попробуйте позже.")
+        return
+
+    await set_last_recipe(message.from_user.id, recipe)
+
+    response_text = format_recipe(recipe)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⭐ В избранное", callback_data="save_last"),
+        InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=safe_str(recipe.get("title", "")))
+    )
+    builder.row(
+        InlineKeyboardButton(text="👍", callback_data="rate:1"),
+        InlineKeyboardButton(text="👎", callback_data="rate:0")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📝 Я приготовил!", callback_data="cook_done")
+    )
+    await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
+
 # ---------- /setprefs ----------
 @router.message(Command("setprefs"))
 async def set_prefs_start(message: types.Message):
@@ -1053,49 +1067,6 @@ async def set_skill(callback: types.CallbackQuery):
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
-
-@router.callback_query(F.data == "cook_done")
-async def mark_as_cooked(callback: types.CallbackQuery):
-    recipe = await get_last_recipe(callback.from_user.id)
-    if recipe is None:
-        await callback.answer("Рецепт не найден.", show_alert=True)
-        return
-
-    await add_cook_log(callback.from_user.id, recipe)
-    await add_score(callback.from_user.id, 10)
-
-    quest = await get_or_create_quest(callback.from_user.id)
-    bonus_earned = False
-    if not quest["completed"] and match_quest(recipe, quest["type"]):
-        await complete_quest(callback.from_user.id)
-        await add_score(callback.from_user.id, 50)
-        bonus_earned = True
-
-    if not await has_achievement(callback.from_user.id, "fast_chef"):
-        raw_time = recipe.get("cooking_time", "")
-        cooking_time = safe_str(raw_time).lower()
-        match = re.search(r'(\d+)\s*мин', cooking_time)
-        if match:
-            mins = int(match.group(1))
-            if mins <= 15:
-                await grant_achievement(callback.from_user.id, "fast_chef")
-
-    new_achievements = await check_and_grant_achievements(callback.from_user.id)
-
-    notifications = []
-    if bonus_earned:
-        notifications.append("🎉 <b>Квест дня выполнен! +50 очков.</b>")
-    if new_achievements:
-        for ach in new_achievements:
-            notifications.append(f"🏆 Новое достижение: {ach['icon']} {ach['name']} – {ach['desc']}")
-    if not quest["completed"] and not bonus_earned:
-        notifications.append(f"📌 <b>Квест дня:</b> {quest['description']} (не выполнен)")
-
-    if notifications:
-        await callback.message.answer("\n".join(notifications), parse_mode="HTML")
-
-    await callback.answer("Записано в дневник! 📖", show_alert=True)
-    await callback.message.edit_reply_markup(reply_markup=None)
 
 # ---------- Коллекции ----------
 @router.message(F.text == "🎯 Коллекции")
