@@ -51,11 +51,11 @@ def make_main_kb(user_id: int):
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🍳 Придумать рецепт"), KeyboardButton(text="⭐ Мои избранные")],
-            [KeyboardButton(text="🧊 Мой холодильник"), [KeyboardButton(text="⏱ Быстрый ужин"), 
-            [KeyboardButton(text="📖 Дневник"), KeyboardButton(text="🔔 Блюдо дня")],
-            [KeyboardButton(text="🏆 Статистика"), KeyboardButton(text="🗡 Квест дня")],
-            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🎯 Коллекции")],
-            [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")], 
+            [KeyboardButton(text="⏱ Быстрый ужин"), KeyboardButton(text="🧊 Мой холодильник")],
+            [KeyboardButton(text="📖 Дневник"), KeyboardButton(text="🏆 Статистика")],
+            [KeyboardButton(text="🔔 Блюдо дня"), KeyboardButton(text="🗡 Квест дня")],
+            [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")],
+            [KeyboardButton(text="🎯 Коллекции"), KeyboardButton(text="⚙️ Настройки")],
             [KeyboardButton(text="ℹ️ О боте")]
         ],
         resize_keyboard=True,
