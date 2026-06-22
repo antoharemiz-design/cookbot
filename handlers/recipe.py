@@ -56,7 +56,7 @@ def make_main_kb(user_id: int):
             [KeyboardButton(text="🏆 Статистика"), KeyboardButton(text="🗡 Квест дня")],
             [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🎯 Коллекции")],
             [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")], 
-                                 [KeyboardButton(text="ℹ️ О боте")]
+            [KeyboardButton(text="ℹ️ О боте")]
         ],
         resize_keyboard=True,
         input_field_placeholder="Что хотите приготовить?"
