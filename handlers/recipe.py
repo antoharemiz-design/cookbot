@@ -263,6 +263,12 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     # --- Если запрошена неделя ---
     elif period == "week":
         days_of_week = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+        cuisines = ["итальянская", "японская", "мексиканская", "индийская", "французская", "тайская", "русская"]
+        day_cuisines = {}
+        if rotate_cuisines:
+            for i, day in enumerate(days_of_week):
+                day_cuisines[day] = cuisines[i % len(cuisines)]
+
         prompts = []
         for day in days_of_week:
             if base_prompt:
@@ -270,6 +276,8 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
             else:
                 prompt = f"Составь меню на {day} (завтрак, обед, ужин). Для каждого приёма пищи предложи полноценный рецепт. "
                 prompt += extra
+                if day_cuisines:
+                    prompt += f" Кухня дня: {day_cuisines[day]}. "
             prompt += (
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
