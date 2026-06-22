@@ -5,6 +5,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from config import TELEGRAM_BOT_TOKEN
 from handlers.recipe import router as recipe_router
+from middlewares import SubscriptionMiddleware
 from handlers.inline import router as inline_router
 from database.db import init_db
 from scheduler import scheduler, send_daily_recipe
@@ -18,6 +19,7 @@ async def main():
     await init_db()
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     dp = Dispatcher()
+    dp.update.middleware(SubscriptionMiddleware())
     dp.include_router(recipe_router)
     dp.include_router(inline_router)
 
