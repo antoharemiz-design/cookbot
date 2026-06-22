@@ -51,11 +51,12 @@ def make_main_kb(user_id: int):
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🍳 Придумать рецепт"), KeyboardButton(text="⭐ Мои избранные")],
-            [KeyboardButton(text="🧊 Мой холодильник"), KeyboardButton(text="📖 Дневник")],
-            [KeyboardButton(text="🏆 Статистика"), KeyboardButton(text="🔔 Блюдо дня")],
-            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🗡 Квест дня")],
-            [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")],
-            [KeyboardButton(text="🎯 Коллекции"), KeyboardButton(text="ℹ️ О боте")]
+            [KeyboardButton(text="🧊 Мой холодильник"), [KeyboardButton(text="⏱ Быстрый ужин"), 
+            [KeyboardButton(text="📖 Дневник"), KeyboardButton(text="🔔 Блюдо дня")],
+            [KeyboardButton(text="🏆 Статистика"), KeyboardButton(text="🗡 Квест дня")],
+            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🎯 Коллекции")],
+            [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")], 
+                                 [KeyboardButton(text="ℹ️ О боте")]
         ],
         resize_keyboard=True,
         input_field_placeholder="Что хотите приготовить?"
@@ -326,43 +327,40 @@ async def process_prompts(message: types.Message, prompts: list[str]):
     # Генерация общего списка покупок (после всех дней)
     if all_ingredients:
         cleaned = []
-        normalize = {
-            "помидора": "помидор", "помидоры": "помидор", "помидору": "помидор",
-            "огурца": "огурец", "огурцы": "огурец", "огурцу": "огурец",
-            "яйца": "яйца", "яйцо": "яйцо", "яйцу": "яйцо",
-            "картофелины": "картофель", "картофеля": "картофель", "картофелю": "картофель",
-            "средних картофелины": "картофель",
-            "луковицы": "лук", "луковица": "лук", "лука": "лук", "луку": "лук",
-            "чеснока": "чеснок", "чеснок": "чеснок", "чесноку": "чеснок",
-            "базилика": "базилик", "базилик": "базилик", "базилику": "базилик",
-            "зелени": "зелень", "зелень": "зелень",
-            "рыбы": "рыба", "рыба": "рыба", "рыбу": "рыба",
-            "курицы": "курица", "курица": "курица", "курицу": "курица",
-            "говядины": "говядина", "говядина": "говядина", "говядину": "говядина",
-            "свинины": "свинина", "свинина": "свинина", "свинину": "свинина",
-            "сыра": "сыр", "сыр": "сыр", "сыру": "сыр",
-            "риса": "рис", "рис": "рис", "рису": "рис",
-            "моркови": "морковь", "морковь": "морковь",
-            "масла": "масло", "масло": "масло", "маслу": "масло",
-            "соли": "соль", "соль": "соль",
-            "перца": "перец", "перец": "перец",
-            "воды": "вода", "вода": "вода",
-            "бульона": "бульон", "бульон": "бульон",
-            "муки": "мука", "мука": "мука",
-            "сахара": "сахар", "сахар": "сахар",
-            "стакана": "", "стаканов": "", "стакан": "",
-            "ложки": "", "ложек": "", "чайная ложка": "", "столовые ложки": "",
-            "грамм": "", "грамма": "", "граммов": "",
-            "кг": "", "г": "", "мл": "", "л": "",
-            "зубчик": "", "зубчика": "", "зубчиков": "",
-            "веточка": "", "веточки": "", "веточек": "",
-            "щепотка": "", "щепотки": "",
-            "по вкусу": "", "средний": "", "большой": "", "маленький": "",
-            "средних": "", "больших": "", "маленьких": "",
-            "для взбивания": "", "размягчённого": "", "ванильного экстракта": "ванильный экстракт",
-            "фрукты для начинки": "фрукты",
-            "шампиньонов": "шампиньоны",
-        }
+            normalize = {
+                "помидора": "помидор", "помидоры": "помидор", "помидору": "помидор",
+                "огурца": "огурец", "огурцы": "огурец", "огурцу": "огурец",
+                "яйца": "яйца", "яйцо": "яйцо", "яйцу": "яйцо",
+                "картофелины": "картофель", "картофеля": "картофель", "картофелю": "картофель",
+                "средних картофелины": "картофель",
+                "луковицы": "лук", "луковица": "лук", "лука": "лук", "луку": "лук",
+                "чеснока": "чеснок", "чеснок": "чеснок", "чесноку": "чеснок",
+                "базилика": "базилик", "базилик": "базилик", "базилику": "базилик",
+                "зелени": "зелень", "зелень": "зелень",
+                "рыбы": "рыба", "рыба": "рыба", "рыбу": "рыба",
+                "курицы": "курица", "курица": "курица", "курицу": "курица",
+                "говядины": "говядина", "говядина": "говядина", "говядину": "говядина",
+                "свинины": "свинина", "свинина": "свинина", "свинину": "свинина",
+                "сыра": "сыр", "сыр": "сыр", "сыру": "сыр",
+                "риса": "рис", "рис": "рис", "рису": "рис",
+                "моркови": "морковь", "морковь": "морковь",
+                "масла": "масло", "масло": "масло", "маслу": "масло",
+                "соли": "соль", "соль": "соль",
+                "перца": "перец", "перец": "перец",
+                "воды": "вода", "вода": "вода",
+                "бульона": "бульон", "бульон": "бульон",
+                "муки": "мука", "мука": "мука",
+                "сахара": "сахар", "сахар": "сахар",
+                "меда": "мёд", "мед": "мёд", "меду": "мёд",
+                "овощей": "овощи", "овощи": "овощи",
+                "фруктов": "фрукты", "фрукты": "фрукты",
+                "орехов": "орехи", "орехи": "орехи",
+                "соуса карри": "соус карри",
+                "овсяных хлопьев": "овсяные хлопья",
+                "куриная грудка": "курица", "куриной грудки": "курица",
+                "филе рыбы": "рыба",
+                "шампиньонов": "шампиньоны", "шампиньоны": "шампиньоны",
+            }
         for ing in all_ingredients:
             ing = re.sub(r'\([^)]*\)', '', ing)
             ing = re.sub(r'\d+[\s,]*', '', ing)
@@ -403,6 +401,52 @@ async def cmd_start(message: types.Message):
         parse_mode="HTML",
         reply_markup=make_main_kb(message.from_user.id)
     )
+
+@router.message(F.text == "⏱ Быстрый ужин")
+async def quick_dinner(message: types.Message):
+    await message.answer("👨‍🍳 Ищу быстрый рецепт...")
+    fridge_products = await get_fridge(message.from_user.id)
+    if fridge_products:
+        user_input = ", ".join(fridge_products) + " приготовь быстрое блюдо до 20 минут"
+    else:
+        user_input = "придумай быстрый ужин до 20 минут из простых продуктов"
+
+    prefs = await get_user_prefs(message.from_user.id)
+    extra = ""
+    if prefs:
+        if prefs.get("diet") and prefs["diet"] != "Без ограничений":
+            extra += f"Диета: {prefs['diet']}. "
+        if prefs.get("allergies") and prefs["allergies"] != "Нет":
+            extra += f"Аллергии: {prefs['allergies']}. "
+        if prefs.get("dislikes") and prefs["dislikes"] != "Нет":
+            extra += f"Не любит: {prefs['dislikes']}. "
+        if prefs.get("skill"):
+            extra += f"Уровень готовки: {prefs['skill']}. "
+    taste_summary = await get_taste_summary(message.from_user.id)
+    if taste_summary:
+        extra += taste_summary
+
+    recipe, raw_response = await get_recipe(user_input, extra_context=extra)
+    if recipe is None:
+        await message.answer("😔 Не удалось найти быстрый рецепт. Попробуйте позже.")
+        return
+
+    await set_last_recipe(message.from_user.id, recipe)
+
+    response_text = format_recipe(recipe)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⭐ В избранное", callback_data="save_last"),
+        InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=safe_str(recipe.get("title", "")))
+    )
+    builder.row(
+        InlineKeyboardButton(text="👍", callback_data="rate:1"),
+        InlineKeyboardButton(text="👎", callback_data="rate:0")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📝 Я приготовил!", callback_data="cook_done")
+    )
+    await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @router.message(F.text == "🍳 Придумать рецепт")
 async def prompt_products(message: types.Message):
@@ -466,7 +510,8 @@ async def delete_favorite(callback: types.CallbackQuery):
     lambda msg: msg.text and not msg.text.startswith('/') and msg.text not in [
         "🍳 Придумать рецепт", "⭐ Мои избранные", "🧊 Мой холодильник", "📖 Дневник",
         "🏆 Статистика", "🔔 Блюдо дня", "⚙️ Настройки", "🗡 Квест дня",
-        "📅 План на день", "📅 План на неделю", "🎯 Коллекции", "ℹ️ О боте"
+        "📅 План на день", "📅 План на неделю", "🎯 Коллекции", "ℹ️ О боте",
+        "⏱ Быстрый ужин"
     ]
 )
 async def generate_recipe(message: types.Message):
@@ -520,8 +565,6 @@ async def generate_recipe(message: types.Message):
         return
 
     await set_last_recipe(message.from_user.id, recipe)
-    await add_cook_log(message.from_user.id, recipe)
-    await add_score(message.from_user.id, 10)
 
     quest = await get_or_create_quest(message.from_user.id)
     bonus_earned = False
@@ -550,6 +593,10 @@ async def generate_recipe(message: types.Message):
     builder.row(
         InlineKeyboardButton(text="👍", callback_data="rate:1"),
         InlineKeyboardButton(text="👎", callback_data="rate:0")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📝 Я приготовил!", callback_data="cook_done")
+    )
     )
     await message.answer(response_text, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -1006,6 +1053,49 @@ async def set_skill(callback: types.CallbackQuery):
     await update_user_prefs(callback.from_user.id, skill=skill)
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
+
+@router.callback_query(F.data == "cook_done")
+async def mark_as_cooked(callback: types.CallbackQuery):
+    recipe = await get_last_recipe(callback.from_user.id)
+    if recipe is None:
+        await callback.answer("Рецепт не найден.", show_alert=True)
+        return
+
+    await add_cook_log(callback.from_user.id, recipe)
+    await add_score(callback.from_user.id, 10)
+
+    quest = await get_or_create_quest(callback.from_user.id)
+    bonus_earned = False
+    if not quest["completed"] and match_quest(recipe, quest["type"]):
+        await complete_quest(callback.from_user.id)
+        await add_score(callback.from_user.id, 50)
+        bonus_earned = True
+
+    if not await has_achievement(callback.from_user.id, "fast_chef"):
+        raw_time = recipe.get("cooking_time", "")
+        cooking_time = safe_str(raw_time).lower()
+        match = re.search(r'(\d+)\s*мин', cooking_time)
+        if match:
+            mins = int(match.group(1))
+            if mins <= 15:
+                await grant_achievement(callback.from_user.id, "fast_chef")
+
+    new_achievements = await check_and_grant_achievements(callback.from_user.id)
+
+    notifications = []
+    if bonus_earned:
+        notifications.append("🎉 <b>Квест дня выполнен! +50 очков.</b>")
+    if new_achievements:
+        for ach in new_achievements:
+            notifications.append(f"🏆 Новое достижение: {ach['icon']} {ach['name']} – {ach['desc']}")
+    if not quest["completed"] and not bonus_earned:
+        notifications.append(f"📌 <b>Квест дня:</b> {quest['description']} (не выполнен)")
+
+    if notifications:
+        await callback.message.answer("\n".join(notifications), parse_mode="HTML")
+
+    await callback.answer("Записано в дневник! 📖", show_alert=True)
+    await callback.message.edit_reply_markup(reply_markup=None)
 
 # ---------- Коллекции ----------
 @router.message(F.text == "🎯 Коллекции")
