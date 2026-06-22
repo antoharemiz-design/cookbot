@@ -220,7 +220,7 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     if add_kbju:
         extra += "Для каждого рецепта укажи примерную калорийность и БЖУ (белки, жиры, углеводы). "
     if rotate_cuisines and period == "week":
-        extra += "Каждый день должен быть посвящён разной кухне (итальянская, японская, мексиканская и т.д.). "
+        extra += "Каждый день должен быть посвящён разной кухне: итальянская, японская, мексиканская, индийская, французская, тайская, русская, грузинская. Не повторяй кухни. "
 
     # Проверяем, является ли preferences готовым промптом
     if preferences and preferences.startswith("Составь меню"):
@@ -1055,13 +1055,14 @@ async def inline_recipe(inline_query: types.InlineQuery):
     if not query or len(query) < 3:
         return
 
-    # Генерируем несколько рецептов, делая запросы к AI с небольшим смещением температуры
     recipes = []
-    for i in range(3):  # Попробуем 3 раза, чтобы получить разные варианты
-        recipe, _ = await get_recipe(query, extra_context=f"Вариант {i+1}. Придумай другое блюдо, отличное от предыдущих.")
-        if recipe:
+    # Делаем до 3 попыток получить разные рецепты
+    for attempt in range(3):
+        extra_context = f"Вариант {attempt+1}. Предложи блюдо, отличное от предыдущих: "
+        recipe, _ = await get_recipe(query, extra_context=extra_context)
+        if recipe and recipe not in recipes:
             recipes.append(recipe)
-        if len(recipes) >= 5:  # Telegram ограничивает 5 результатами в инлайн-режиме
+        if len(recipes) >= 5:
             break
 
     if not recipes:
