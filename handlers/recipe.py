@@ -208,32 +208,19 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         if prefs.get("skill"):
             extra += f"Уровень готовки: {prefs['skill']}. "
     if preferences and not preferences.startswith("Составь меню"):
-    if add_wine:
-        extra += "К каждому ужину предложи подходящее вино. "
-    if add_kbju:
-        extra += "Для каждого рецепта укажи примерную калорийность и БЖУ (белки, жиры, углеводы). "
-    if rotate_cuisines and period == "week":
-        extra += "Каждый день должен быть посвящён разной кухне (итальянская, японская, мексиканская и т.д.). "
         extra += f"Дополнительные пожелания: {preferences}. "
-            # Расширенные опции планировщика
-    add_wine = "вино" in preferences.lower() or "вина" in preferences.lower()
-    add_kbju = "калории" in preferences.lower() or "кбжу" in preferences.lower() or "бжу" in preferences.lower()
-    rotate_cuisines = "чередовать кухни" in preferences.lower() or "разные кухни" in preferences.lower()
-
-    if add_wine:
-        extra += "К каждому ужину предложи подходящее вино. "
-    if add_kbju:
-        extra += "Для каждого рецепта укажи примерную калорийность и БЖУ (белки, жиры, углеводы). "
-    if rotate_cuisines and period == "week":
-        extra += "Каждый день должен быть посвящён разной кухне (итальянская, японская, мексиканская и т.д.). "
 
     fridge_products = await get_fridge(message.from_user.id)
     if fridge_products:
         extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
-            # Персональные предпочтения
-    taste_summary = await get_taste_summary(message.from_user.id)
-    if taste_summary:
-        extra += taste_summary
+
+    # Добавляем опции расширенного планировщика
+    if add_wine:
+        extra += "К каждому ужину предложи подходящее вино. "
+    if add_kbju:
+        extra += "Для каждого рецепта укажи примерную калорийность и БЖУ (белки, жиры, углеводы). "
+    if rotate_cuisines and period == "week":
+        extra += "Каждый день должен быть посвящён разной кухне (итальянская, японская, мексиканская и т.д.). "
 
     # Проверяем, является ли preferences готовым промптом
     if preferences and preferences.startswith("Составь меню"):
@@ -246,12 +233,10 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         if specific_day:
             day_names = [specific_day]
         else:
-            # Для коллекций (base_prompt) не принуждаем к "Сегодня", оставляем пустой список
             day_names = [] if base_prompt else ["Сегодня"]
 
         prompts = []
         if base_prompt:
-            # Используем готовый промпт, день уже содержится в нём
             prompt = base_prompt + " " + extra
             prompt += (
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
@@ -289,7 +274,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
             prompts.append(prompt)
         await process_prompts(message, prompts)
     else:
-        # На всякий случай – одиночный день по названию
         if base_prompt:
             prompt = base_prompt + " " + extra
         else:
