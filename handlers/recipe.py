@@ -381,22 +381,35 @@ async def process_prompts(message: types.Message, prompts: list[str]):
 async def cmd_start(message: types.Message):
     prefs = await get_user_prefs(message.from_user.id)
     name = prefs.get("name") if prefs else None
-    greeting = f"👋 С возвращением, {name}!" if name else "👋 Добро пожаловать в CookBot!"
+    if name:
+        greeting = f"👋 С возвращением, {name}!"
+    else:
+        greeting = "👋 Добро пожаловать в CookBot!"
+
     quest = await get_or_create_quest(message.from_user.id)
     quest_text = ""
     if not quest["completed"]:
         quest_text = f"\n\n🗡 <b>Квест дня:</b> {quest['description']}\n<i>Просто введите продукты, и если рецепт подойдёт, вы получите 50 очков!</i>"
 
+    # Приветственное фото (замени URL на своё, если нужно)
+    welcome_photo = "https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+    await message.answer_photo(photo=welcome_photo, caption="🍽️")
+
+    # Основное приветствие
     await message.answer(
         f"{greeting}\n\n"
-        "Я твой личный шеф-помощник. Я умею:\n"
-        "• Придумывать рецепты из твоих продуктов\n"
-        "• Учитывать диету, аллергии и предпочтения\n"
-        "• Сохранять любимые рецепты\n"
-        "• Присылать блюдо дня\n"
-        "• Давать ежедневные задания с наградами 🏆\n"
-        "• Вести твой виртуальный холодильник 🧊\n"
-        "• Составлять меню на день и неделю 📅"
+        "Я твой персональный AI-шеф. Я умею:\n"
+        "• 🍳 Придумывать рецепты из того, что есть в холодильнике\n"
+        "• 🥗 Учитывать диету, аллергии и вкусы\n"
+        "• 📅 Составлять меню на день или неделю\n"
+        "• ⭐ Сохранять любимые блюда\n"
+        "• 🔔 Присылать блюдо дня\n"
+        "• 🏆 Давать задания и награждать за готовку\n"
+        "• 🧊 Вести виртуальный холодильник\n"
+        "• ⏱ Искать быстрый ужин\n"
+        "• 🌍 Работать в любом чате через @cookmaster_shef_bot\n\n"
+        "Чтобы начать, просто выбери действие в меню или напиши мне список продуктов!\n"
+        "<i>Например: курица, лук, сметана, гречка</i>"
         f"{quest_text}",
         parse_mode="HTML",
         reply_markup=make_main_kb(message.from_user.id)
