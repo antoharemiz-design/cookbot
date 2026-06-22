@@ -44,6 +44,7 @@ class FridgeAdd(StatesGroup):
 
 class PlanWaiting(StatesGroup):
     waiting_for_prefs = State()
+    waiting_for_options = State()
 
 class WeekDaySelect(StatesGroup):
     waiting_for_day = State()
@@ -176,7 +177,10 @@ async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[
     return await get_recipe(user_input, extra_context=extra)
 
 # ---------- Общая функция планировщика ----------
-async def generate_plan(message: types.Message, period: str, preferences: str = "", specific_day: str = None, silent: bool = False):
+async def generate_plan(message: types.Message, period: str, preferences: str = "",
+                        specific_day: str = None, silent: bool = False,
+                        add_wine: bool = False, add_kbju: bool = False,
+                        rotate_cuisines: bool = False):
     """
     Генерирует меню на день или неделю.
     Если period == "week", генерирует отдельно для каждого дня (7 запросов).
@@ -204,7 +208,24 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         if prefs.get("skill"):
             extra += f"Уровень готовки: {prefs['skill']}. "
     if preferences and not preferences.startswith("Составь меню"):
+    if add_wine:
+        extra += "К каждому ужину предложи подходящее вино. "
+    if add_kbju:
+        extra += "Для каждого рецепта укажи примерную калорийность и БЖУ (белки, жиры, углеводы). "
+    if rotate_cuisines and period == "week":
+        extra += "Каждый день должен быть посвящён разной кухне (итальянская, японская, мексиканская и т.д.). "
         extra += f"Дополнительные пожелания: {preferences}. "
+            # Расширенные опции планировщика
+    add_wine = "вино" in preferences.lower() or "вина" in preferences.lower()
+    add_kbju = "калории" in preferences.lower() or "кбжу" in preferences.lower() or "бжу" in preferences.lower()
+    rotate_cuisines = "чередовать кухни" in preferences.lower() or "разные кухни" in preferences.lower()
+
+    if add_wine:
+        extra += "К каждому ужину предложи подходящее вино. "
+    if add_kbju:
+        extra += "Для каждого рецепта укажи примерную калорийность и БЖУ (белки, жиры, углеводы). "
+    if rotate_cuisines and period == "week":
+        extra += "Каждый день должен быть посвящён разной кухне (итальянская, японская, мексиканская и т.д.). "
 
     fridge_products = await get_fridge(message.from_user.id)
     if fridge_products:
@@ -721,6 +742,26 @@ async def toggle_daily(message: types.Message):
 async def settings_button(message: types.Message):
     await set_prefs_start(message)
 
+
+async def show_options_message(message: types.Message, state: FSMContext, period: str):
+    data = await state.get_data()
+    add_wine = data.get("add_wine", False)
+    add_kbju = data.get("add_kbju", False)
+    rotate = data.get("rotate_cuisines", False)
+
+    wine_text = "✅ Вино" if add_wine else "🍷 Вино"
+    kbju_text = "✅ КБЖУ" if add_kbju else "📊 КБЖУ"
+    rotate_text = "✅ Чередовать кухни" if rotate else "🌍 Чередовать кухни"
+
+    buttons = [
+        [InlineKeyboardButton(text=wine_text, callback_data="toggle_wine")],
+        [InlineKeyboardButton(text=kbju_text, callback_data="toggle_kbju")],
+    ]
+    if period == "week":
+        buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
+    buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
+
+    await message.answer("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 # ---------- Планировщик меню ----------
 @router.message(F.text == "🎯 Коллекции")
 async def collections_menu(message: types.Message):
@@ -806,10 +847,11 @@ async def plan_specific_day(callback: types.CallbackQuery, state: FSMContext):
 async def plan_no_prefs(message: types.Message, state: FSMContext):
     data = await state.get_data()
     period = data.get("period", "day")
-    specific_day = data.get("specific_day")  # может быть None
-    await state.clear()
-    await generate_plan(message, period, specific_day=specific_day)
-    await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
+    specific_day = data.get("specific_day")
+    await state.update_data(preferences="", period=period, specific_day=specific_day,
+                            add_wine=False, add_kbju=False, rotate_cuisines=False)
+    await state.set_state(PlanWaiting.waiting_for_options)
+    await show_options_message(message, state, period)
 
 @router.message(PlanWaiting.waiting_for_prefs, F.text)
 async def plan_with_prefs(message: types.Message, state: FSMContext):
@@ -817,9 +859,10 @@ async def plan_with_prefs(message: types.Message, state: FSMContext):
     data = await state.get_data()
     period = data.get("period", "day")
     specific_day = data.get("specific_day")
-    await state.clear()
-    await generate_plan(message, period, preferences, specific_day=specific_day)
-    await message.answer("Главное меню", reply_markup=make_main_kb(message.from_user.id))
+    await state.update_data(preferences=preferences, period=period, specific_day=specific_day,
+                            add_wine=False, add_kbju=False, rotate_cuisines=False)
+    await state.set_state(PlanWaiting.waiting_for_options)
+    await show_options_message(message, state, period)
 
 # Команда /plan
 @router.message(Command("plan"))
@@ -929,6 +972,56 @@ async def set_skill(callback: types.CallbackQuery):
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
 
+@router.callback_query(F.data == "toggle_wine")
+async def toggle_wine(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    new_val = not data.get("add_wine", False)
+    await state.update_data(add_wine=new_val)
+    data = await state.get_data()
+    period = data.get("period", "day")
+    await show_options_message(callback.message, state, period)
+    await callback.answer()
+
+@router.callback_query(F.data == "toggle_kbju")
+async def toggle_kbju(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    new_val = not data.get("add_kbju", False)
+    await state.update_data(add_kbju=new_val)
+    data = await state.get_data()
+    period = data.get("period", "day")
+    await show_options_message(callback.message, state, period)
+    await callback.answer()
+
+@router.callback_query(F.data == "toggle_rotate")
+async def toggle_rotate(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    new_val = not data.get("rotate_cuisines", False)
+    await state.update_data(rotate_cuisines=new_val)
+    data = await state.get_data()
+    period = data.get("period", "day")
+    await show_options_message(callback.message, state, period)
+    await callback.answer()
+
+@router.callback_query(F.data == "start_plan")
+async def start_plan(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    period = data.get("period", "day")
+    specific_day = data.get("specific_day")
+    preferences = data.get("preferences", "")
+    add_wine = data.get("add_wine", False)
+    add_kbju = data.get("add_kbju", False)
+    rotate_cuisines = data.get("rotate_cuisines", False)
+
+    await state.clear()
+    await callback.message.answer("Запускаю генерацию плана...")
+    await generate_plan(callback.message, period, preferences=preferences,
+                        specific_day=specific_day,
+                        add_wine=add_wine, add_kbju=add_kbju,
+                        rotate_cuisines=rotate_cuisines,
+                        silent=True)   # можно True, чтобы не дублировать сообщения
+    await callback.message.answer("Главное меню", reply_markup=make_main_kb(callback.from_user.id))
+    await callback.answer()
+
 # ---------- Инлайн-режим ----------
 @router.inline_query()
 async def inline_recipe(inline_query: types.InlineQuery):
@@ -936,28 +1029,39 @@ async def inline_recipe(inline_query: types.InlineQuery):
     if not query or len(query) < 3:
         return
 
-    recipe, _ = await get_recipe(query)
-    if recipe is None:
+    # Генерируем несколько рецептов, делая запросы к AI с небольшим смещением температуры
+    recipes = []
+    for i in range(3):  # Попробуем 3 раза, чтобы получить разные варианты
+        recipe, _ = await get_recipe(query, extra_context=f"Вариант {i+1}. Придумай другое блюдо, отличное от предыдущих.")
+        if recipe:
+            recipes.append(recipe)
+        if len(recipes) >= 5:  # Telegram ограничивает 5 результатами в инлайн-режиме
+            break
+
+    if not recipes:
         return
 
-    title = safe_str(recipe.get("title", "Рецепт"))
-    time = safe_str(recipe.get("cooking_time", "? мин"))
-    description = f"⏱ {time} | {safe_str(recipe.get('difficulty', ''))}"
-    ingredients = "\n".join(f"• {safe_str(ing)}" for ing in recipe.get("ingredients", []))
-    steps = "\n".join(f"{i+1}. {safe_str(step)}" for i, step in enumerate(recipe.get("steps", [])))
-    full_text = f"🍽 <b>{title}</b>\n⏱ {time}\n\n<b>Ингредиенты:</b>\n{ingredients}\n\n<b>Приготовление:</b>\n{steps}"
-    tip = safe_str(recipe.get("tip", ""))
-    if tip:
-        full_text += f"\n\n💡 {tip}"
+    results = []
+    for recipe in recipes:
+        title = safe_str(recipe.get("title", "Рецепт"))
+        time = safe_str(recipe.get("cooking_time", "? мин"))
+        description = f"⏱ {time} | {safe_str(recipe.get('difficulty', ''))}"
+        ingredients = "\n".join(f"• {safe_str(ing)}" for ing in recipe.get("ingredients", []))
+        steps = "\n".join(f"{i+1}. {safe_str(step)}" for i, step in enumerate(recipe.get("steps", [])))
+        full_text = f"🍽 <b>{title}</b>\n⏱ {time}\n\n<b>Ингредиенты:</b>\n{ingredients}\n\n<b>Приготовление:</b>\n{steps}"
+        tip = safe_str(recipe.get("tip", ""))
+        if tip:
+            full_text += f"\n\n💡 {tip}"
 
-    input_content = InputTextMessageContent(full_text, parse_mode="HTML")
-    result_id = hashlib.md5(query.encode()).hexdigest()
+        input_content = InputTextMessageContent(full_text, parse_mode="HTML")
+        result_id = hashlib.md5(f"{query}_{title}".encode()).hexdigest()
+        results.append(
+            InlineQueryResultArticle(
+                id=result_id,
+                title=title,
+                description=description,
+                input_message_content=input_content
+            )
+        )
 
-    result = InlineQueryResultArticle(
-        id=result_id,
-        title=title,
-        description=description,
-        input_message_content=input_content
-    )
-
-    await inline_query.answer([result], cache_time=10)
+    await inline_query.answer(results, cache_time=5)
