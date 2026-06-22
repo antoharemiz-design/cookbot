@@ -241,7 +241,9 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
             prompt += (
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
-                '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
+                '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "...", '
+                '"wine": "рекомендованное вино (только если запрошено)", '
+                '"nutrition": { "calories": "...", "protein": "...", "fat": "...", "carbs": "..." } } } ] } ] }'
             )
             prompts.append(prompt)
         else:
@@ -251,7 +253,9 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                 prompt += (
                     'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                     '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
-                    '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
+                    '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "...", '
+                    '"wine": "рекомендованное вино (только если запрошено)", '
+                    '"nutrition": { "calories": "...", "protein": "...", "fat": "...", "carbs": "..." } } } ] } ] }'
                 )
                 prompts.append(prompt)
         await process_prompts(message, prompts)
@@ -269,7 +273,9 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
             prompt += (
                 'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
                 '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
-                '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
+                '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "...", '
+                '"wine": "рекомендованное вино (только если запрошено)", '
+                '"nutrition": { "calories": "...", "protein": "...", "fat": "...", "carbs": "..." } } } ] } ] }'
             )
             prompts.append(prompt)
         await process_prompts(message, prompts)
@@ -281,7 +287,9 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
         prompt += (
             'Ответь в формате JSON: { "days": [ { "day": "Название дня", "meals": [ '
             '{ "type": "завтрак/обед/ужин", "recipe": { "title": "...", "cooking_time": "...", '
-            '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "..." } } ] } ] }'
+            '"difficulty": "...", "ingredients": ["..."], "steps": ["..."], "tip": "...", '
+            '"wine": "рекомендованное вино (только если запрошено)", '
+            '"nutrition": { "calories": "...", "protein": "...", "fat": "...", "carbs": "..." } } } ] } ] }'
         )
         await process_prompts(message, [prompt])
 
@@ -314,7 +322,23 @@ async def process_prompts(message: types.Message, prompts: list[str]):
                             ingr_text += "..."
                         day_text += f"🍽 <i>{meal_type}</i>: <b>{title}</b>\n"
                         day_text += f"⏱ {time} | {diff}\n"
-                        day_text += f"Ингредиенты: {ingr_text}\n\n"
+                        day_text += f"Ингредиенты: {ingr_text}\n"
+
+                        # Вино (только для ужина)
+                        if meal_type.lower() == "ужин" and rec.get("wine"):
+                            day_text += f"🍷 Вино: {safe_str(rec['wine'])}\n"
+
+                        # КБЖУ
+                        nutrition = rec.get("nutrition")
+                        if nutrition:
+                            cal = safe_str(nutrition.get("calories", ""))
+                            prot = safe_str(nutrition.get("protein", ""))
+                            fat = safe_str(nutrition.get("fat", ""))
+                            carb = safe_str(nutrition.get("carbs", ""))
+                            if cal or prot or fat or carb:
+                                day_text += f"📊 КБЖУ: {cal} ккал, Б: {prot}, Ж: {fat}, У: {carb}\n"
+
+                        day_text += "\n"
                         all_ingredients.extend([safe_str(i).lower() for i in ingredients])
                     else:
                         day_text += f"🍽 <i>{meal_type}</i>: (нет данных)\n"
@@ -726,6 +750,26 @@ async def toggle_daily(message: types.Message):
 async def settings_button(message: types.Message):
     await set_prefs_start(message)
 
+async def update_options_message(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    add_wine = data.get("add_wine", False)
+    add_kbju = data.get("add_kbju", False)
+    rotate = data.get("rotate_cuisines", False)
+    period = data.get("period", "day")
+
+    wine_text = "✅ Вино" if add_wine else "🍷 Вино"
+    kbju_text = "✅ КБЖУ" if add_kbju else "📊 КБЖУ"
+    rotate_text = "✅ Чередовать кухни" if rotate else "🌍 Чередовать кухни"
+
+    buttons = [
+        [InlineKeyboardButton(text=wine_text, callback_data="toggle_wine")],
+        [InlineKeyboardButton(text=kbju_text, callback_data="toggle_kbju")],
+    ]
+    if period == "week":
+        buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
+    buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
+
+    await callback.message.edit_text("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 async def show_options_message(message: types.Message, state: FSMContext, period: str):
     data = await state.get_data()
@@ -745,7 +789,8 @@ async def show_options_message(message: types.Message, state: FSMContext, period
         buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
     buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
 
-    await message.answer("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    sent = await message.answer("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    return sent
 # ---------- Планировщик меню ----------
 @router.message(F.text == "🎯 Коллекции")
 async def collections_menu(message: types.Message):
@@ -961,9 +1006,8 @@ async def toggle_wine(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     new_val = not data.get("add_wine", False)
     await state.update_data(add_wine=new_val)
-    data = await state.get_data()
-    period = data.get("period", "day")
-    await show_options_message(callback.message, state, period)
+    # Перерисовываем то же сообщение
+    await update_options_message(callback, state)
     await callback.answer()
 
 @router.callback_query(F.data == "toggle_kbju")
@@ -971,9 +1015,7 @@ async def toggle_kbju(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     new_val = not data.get("add_kbju", False)
     await state.update_data(add_kbju=new_val)
-    data = await state.get_data()
-    period = data.get("period", "day")
-    await show_options_message(callback.message, state, period)
+    await update_options_message(callback, state)
     await callback.answer()
 
 @router.callback_query(F.data == "toggle_rotate")
@@ -981,9 +1023,7 @@ async def toggle_rotate(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     new_val = not data.get("rotate_cuisines", False)
     await state.update_data(rotate_cuisines=new_val)
-    data = await state.get_data()
-    period = data.get("period", "day")
-    await show_options_message(callback.message, state, period)
+    await update_options_message(callback, state)
     await callback.answer()
 
 @router.callback_query(F.data == "start_plan")
@@ -997,12 +1037,14 @@ async def start_plan(callback: types.CallbackQuery, state: FSMContext):
     rotate_cuisines = data.get("rotate_cuisines", False)
 
     await state.clear()
-    await callback.message.answer("Запускаю генерацию плана...")
+    # Удаляем сообщение с опциями
+    await callback.message.edit_text("Запускаю генерацию плана...")
+    # Генерируем
     await generate_plan(callback.message, period, preferences=preferences,
                         specific_day=specific_day,
                         add_wine=add_wine, add_kbju=add_kbju,
                         rotate_cuisines=rotate_cuisines,
-                        silent=True)   # можно True, чтобы не дублировать сообщения
+                        silent=True)
     await callback.message.answer("Главное меню", reply_markup=make_main_kb(callback.from_user.id))
     await callback.answer()
 
