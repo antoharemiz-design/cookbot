@@ -17,7 +17,7 @@ from database.db import (
     check_and_grant_achievements, get_user_achievements, get_cooked_count, get_score, add_score,
     grant_achievement, has_achievement, ACHIEVEMENTS, QUEST_TYPES, get_completed_quests_count,
     add_to_fridge, remove_from_fridge, get_fridge,
-    update_taste_prefs, get_taste_summary   # ← вот так
+    update_taste_prefs, get_taste_summary
 )
 import logging
 import re
@@ -46,9 +46,6 @@ class PlanWaiting(StatesGroup):
     waiting_for_prefs = State()
     waiting_for_options = State()
 
-class WeekDaySelect(StatesGroup):
-    waiting_for_day = State()
-
 # ---------- Главное меню ----------
 def make_main_kb(user_id: int):
     return ReplyKeyboardMarkup(
@@ -58,7 +55,6 @@ def make_main_kb(user_id: int):
             [KeyboardButton(text="🏆 Статистика"), KeyboardButton(text="🔔 Блюдо дня")],
             [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🗡 Квест дня")],
             [KeyboardButton(text="📅 План на день"), KeyboardButton(text="📅 План на неделю")],
-            [KeyboardButton(text="🌍 Вся неделя (чередование)")],
             [KeyboardButton(text="🎯 Коллекции"), KeyboardButton(text="ℹ️ О боте")]
         ],
         resize_keyboard=True,
@@ -68,22 +64,6 @@ def make_main_kb(user_id: int):
 def plan_waiting_kb():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🚫 Без пожеланий")]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-def week_days_kb():
-    """Клавиатура для выбора дня недели."""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Понедельник")],
-            [KeyboardButton(text="Вторник")],
-            [KeyboardButton(text="Среда")],
-            [KeyboardButton(text="Четверг")],
-            [KeyboardButton(text="Пятница")],
-            [KeyboardButton(text="Суббота")],
-            [KeyboardButton(text="Воскресенье")]
-        ],
         resize_keyboard=True,
         one_time_keyboard=True
     )
@@ -170,11 +150,11 @@ async def generate_recipe_from_list(user_id: int, products: list[str]) -> tuple[
             extra += f"Не любит: {prefs['dislikes']}. "
         if prefs.get("skill"):
             extra += f"Уровень готовки: {prefs['skill']}. "
-    user_input = ", ".join(products)
-        # Добавляем персональные предпочтения
-    taste_summary = await get_taste_summary(message.from_user.id)
+    # Персональные предпочтения
+    taste_summary = await get_taste_summary(user_id)
     if taste_summary:
         extra += taste_summary
+    user_input = ", ".join(products)
     return await get_recipe(user_input, extra_context=extra)
 
 # ---------- Общая функция планировщика ----------
@@ -182,11 +162,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                         specific_day: str = None, silent: bool = False,
                         add_wine: bool = False, add_kbju: bool = False,
                         rotate_cuisines: bool = False):
-    """
-    Генерирует меню на день или неделю.
-    Если period == "week", генерирует отдельно для каждого дня (7 запросов).
-    Если preferences начинается с "Составь меню", используется как базовый промпт (для коллекций).
-    """
     if not silent:
         if specific_day:
             display_name = specific_day
@@ -196,7 +171,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
             display_name = period
         await message.answer(f"📅 Генерирую меню на {display_name}...")
 
-    # Собираем контекст (профиль, холодильник)
     prefs = await get_user_prefs(message.from_user.id)
     extra = ""
     if prefs:
@@ -215,7 +189,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     if fridge_products:
         extra += f"В холодильнике есть: {', '.join(fridge_products)}. "
 
-    # Добавляем опции расширенного планировщика
     if add_wine:
         extra += "К каждому ужину предложи подходящее вино. "
     if add_kbju:
@@ -223,13 +196,11 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
     if rotate_cuisines and period == "week":
         extra += "Каждый день должен быть посвящён разной кухне: итальянская, японская, мексиканская, индийская, французская, тайская, русская, грузинская. Не повторяй кухни. "
 
-    # Проверяем, является ли preferences готовым промптом
     if preferences and preferences.startswith("Составь меню"):
         base_prompt = preferences
     else:
         base_prompt = None
 
-    # --- Если запрошен конкретный день или одиночный день ---
     if specific_day or period == "day":
         if specific_day:
             day_names = [specific_day]
@@ -261,7 +232,6 @@ async def generate_plan(message: types.Message, period: str, preferences: str = 
                 prompts.append(prompt)
         await process_prompts(message, prompts)
 
-    # --- Если запрошена неделя ---
     elif period == "week":
         days_of_week = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
         cuisines = ["итальянская", "японская", "мексиканская", "индийская", "французская", "тайская", "русская"]
@@ -333,11 +303,9 @@ async def process_prompts(message: types.Message, prompts: list[str]):
                         day_text += f"⏱ {time} | {diff}\n"
                         day_text += f"Ингредиенты: {ingr_text}\n"
 
-                        # Вино (только для ужина)
                         if meal_type.lower() == "ужин" and rec.get("wine"):
                             day_text += f"🍷 Вино: {safe_str(rec['wine'])}\n"
 
-                        # КБЖУ
                         nutrition = rec.get("nutrition")
                         if nutrition:
                             cal = safe_str(nutrition.get("calories", ""))
@@ -355,65 +323,60 @@ async def process_prompts(message: types.Message, prompts: list[str]):
         except Exception as e:
             await message.answer(f"Меню для одного из дней повреждено:\n<pre>{safe_str(raw_response)[:1000]}</pre>", parse_mode="HTML")
 
-        # Генерация чистого списка покупок
-        if all_ingredients:
-            cleaned = []
-            # Расширенный словарь нормализации
-            normalize = {
-                "помидора": "помидор", "помидоры": "помидор", "помидору": "помидор",
-                "огурца": "огурец", "огурцы": "огурец", "огурцу": "огурец",
-                "яйца": "яйца", "яйцо": "яйцо", "яйцу": "яйцо",
-                "картофелины": "картофель", "картофеля": "картофель", "картофелю": "картофель",
-                "средних картофелины": "картофель",
-                "луковицы": "лук", "луковица": "лук", "лука": "лук", "луку": "лук",
-                "чеснока": "чеснок", "чеснок": "чеснок", "чесноку": "чеснок",
-                "базилика": "базилик", "базилик": "базилик", "базилику": "базилик",
-                "зелени": "зелень", "зелень": "зелень",
-                "рыбы": "рыба", "рыба": "рыба", "рыбу": "рыба",
-                "курицы": "курица", "курица": "курица", "курицу": "курица",
-                "говядины": "говядина", "говядина": "говядина", "говядину": "говядина",
-                "свинины": "свинина", "свинина": "свинина", "свинину": "свинина",
-                "сыра": "сыр", "сыр": "сыр", "сыру": "сыр",
-                "риса": "рис", "рис": "рис", "рису": "рис",
-                "моркови": "морковь", "морковь": "морковь",
-                "масла": "масло", "масло": "масло", "маслу": "масло",
-                "соли": "соль", "соль": "соль",
-                "перца": "перец", "перец": "перец",
-                "воды": "вода", "вода": "вода",
-                "бульона": "бульон", "бульон": "бульон",
-                "муки": "мука", "мука": "мука",
-                "сахара": "сахар", "сахар": "сахар",
-                "стакана": "стакан", "стакан": "стакан",
-                "стаканов": "стакан",
-                "ложки": "ложка", "ложка": "ложка",
-                "ложек": "ложка",
-                "чайная ложка": "чайная ложка",
-                "столовые ложки": "столовая ложка",
-                "грамм": "", "грамма": "", "граммов": "",
-                "кг": "", "г": "", "мл": "", "л": "",
-                "зубчик": "", "зубчика": "", "зубчиков": "",
-                "веточка": "", "веточки": "", "веточек": "",
-                "щепотка": "", "щепотки": "",
-                "по вкусу": "", "средний": "", "большой": "", "маленький": "",
-                "средних": "", "больших": "", "маленьких": "",
-                "для взбивания": "", "размягчённого": "", "ванильного экстракта": "ванильный экстракт",
-                "фрукты для начинки": "фрукты",
-                "шампиньонов": "шампиньоны",
-            }
-            for ing in all_ingredients:
-                ing = re.sub(r'\([^)]*\)', '', ing)
-                ing = re.sub(r'\d+[\s,]*', '', ing)
-                ing = re.sub(r'\b(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|пуч|щеп|по вкусу|зубчик|зубчика|веточка|веточки|пучок|пучка|щепотка|щепотки|средних|больших|маленьких|для взбивания|размягчённого)\b', '', ing, flags=re.IGNORECASE)
-                ing = re.sub(r'[\/\.\,\-\d]+', ' ', ing)
-                ing = ing.strip()
-                ing = normalize.get(ing, ing)
-                if ing and len(ing) > 1 and ing not in ["средний", "большой", "маленький"]:
-                    cleaned.append(ing)
+    # Генерация общего списка покупок (после всех дней)
+    if all_ingredients:
+        cleaned = []
+        normalize = {
+            "помидора": "помидор", "помидоры": "помидор", "помидору": "помидор",
+            "огурца": "огурец", "огурцы": "огурец", "огурцу": "огурец",
+            "яйца": "яйца", "яйцо": "яйцо", "яйцу": "яйцо",
+            "картофелины": "картофель", "картофеля": "картофель", "картофелю": "картофель",
+            "средних картофелины": "картофель",
+            "луковицы": "лук", "луковица": "лук", "лука": "лук", "луку": "лук",
+            "чеснока": "чеснок", "чеснок": "чеснок", "чесноку": "чеснок",
+            "базилика": "базилик", "базилик": "базилик", "базилику": "базилик",
+            "зелени": "зелень", "зелень": "зелень",
+            "рыбы": "рыба", "рыба": "рыба", "рыбу": "рыба",
+            "курицы": "курица", "курица": "курица", "курицу": "курица",
+            "говядины": "говядина", "говядина": "говядина", "говядину": "говядина",
+            "свинины": "свинина", "свинина": "свинина", "свинину": "свинина",
+            "сыра": "сыр", "сыр": "сыр", "сыру": "сыр",
+            "риса": "рис", "рис": "рис", "рису": "рис",
+            "моркови": "морковь", "морковь": "морковь",
+            "масла": "масло", "масло": "масло", "маслу": "масло",
+            "соли": "соль", "соль": "соль",
+            "перца": "перец", "перец": "перец",
+            "воды": "вода", "вода": "вода",
+            "бульона": "бульон", "бульон": "бульон",
+            "муки": "мука", "мука": "мука",
+            "сахара": "сахар", "сахар": "сахар",
+            "стакана": "", "стаканов": "", "стакан": "",
+            "ложки": "", "ложек": "", "чайная ложка": "", "столовые ложки": "",
+            "грамм": "", "грамма": "", "граммов": "",
+            "кг": "", "г": "", "мл": "", "л": "",
+            "зубчик": "", "зубчика": "", "зубчиков": "",
+            "веточка": "", "веточки": "", "веточек": "",
+            "щепотка": "", "щепотки": "",
+            "по вкусу": "", "средний": "", "большой": "", "маленький": "",
+            "средних": "", "больших": "", "маленьких": "",
+            "для взбивания": "", "размягчённого": "", "ванильного экстракта": "ванильный экстракт",
+            "фрукты для начинки": "фрукты",
+            "шампиньонов": "шампиньоны",
+        }
+        for ing in all_ingredients:
+            ing = re.sub(r'\([^)]*\)', '', ing)
+            ing = re.sub(r'\d+[\s,]*', '', ing)
+            ing = re.sub(r'\b(г|кг|мл|л|ст\.?\s*л|ч\.?\s*л|шт|зуб|пуч|щеп|по вкусу|зубчик|зубчика|веточка|веточки|пучок|пучка|щепотка|щепотки|средних|больших|маленьких|для взбивания|размягчённого)\b', '', ing, flags=re.IGNORECASE)
+            ing = re.sub(r'[\/\.\,\-\d]+', ' ', ing)
+            ing = ing.strip()
+            ing = normalize.get(ing, ing)
+            if ing and len(ing) > 1 and ing not in ["средний", "большой", "маленький"]:
+                cleaned.append(ing)
 
-            unique = sorted(set(cleaned))
-            if unique:
-                shop_text = "🛒 <b>Список покупок:</b>\n" + "\n".join(f"• {i}" for i in unique)
-                await message.answer(shop_text, parse_mode="HTML")
+        unique = sorted(set(cleaned))
+        if unique:
+            shop_text = "🛒 <b>Список покупок:</b>\n" + "\n".join(f"• {i}" for i in unique)
+            await message.answer(shop_text, parse_mode="HTML")
 
 # ---------- Команды и кнопки ----------
 @router.message(Command("start"))
@@ -543,6 +506,10 @@ async def generate_recipe(message: types.Message):
                 extra += f"Не любит: {prefs['dislikes']}. "
             if prefs.get("skill"):
                 extra += f"Уровень готовки: {prefs['skill']}. "
+        # Добавляем персональные предпочтения
+        taste_summary = await get_taste_summary(message.from_user.id)
+        if taste_summary:
+            extra += taste_summary
         recipe, raw_response = await get_recipe(user_input, extra_context=extra)
 
     if recipe is None:
@@ -621,9 +588,9 @@ async def handle_rate(callback: types.CallbackQuery):
     rating = int(rating_str)
     title = recipe.get("title", "Без названия")
     await add_rating(callback.from_user.id, safe_str(title), rating)
-    emoji = "👍" if rating else "👎"
-            # Обновляем предпочтения пользователя
+    # Обновляем предпочтения пользователя
     await update_taste_prefs(callback.from_user.id, recipe, rating)
+    emoji = "👍" if rating else "👎"
     await callback.answer(f"Спасибо за оценку! {emoji}", show_alert=False)
     await callback.message.edit_reply_markup(reply_markup=None)
 
@@ -787,6 +754,100 @@ async def toggle_daily(message: types.Message):
 async def settings_button(message: types.Message):
     await set_prefs_start(message)
 
+# ---------- О боте ----------
+@router.message(F.text == "ℹ️ О боте")
+async def about_bot(message: types.Message):
+    await message.answer(
+        "🤖 <b>CookBot</b> — твой персональный шеф-помощник.\n\n"
+        "Я использую искусственный интеллект, чтобы превратить твои продукты в изысканные блюда.\n"
+        "Просто напиши мне список ингредиентов, и я пришлю пошаговый рецепт!\n\n"
+        "🛠 Команды:\n"
+        "/start – главное меню\n"
+        "/setprefs – настройка диеты, аллергий, уровня\n"
+        "/plan – планировщик меню\n"
+        "/help – помощь\n\n"
+        "Приятного аппетита! 🍽️",
+        parse_mode="HTML",
+        reply_markup=make_main_kb(message.from_user.id)
+    )
+
+# ---------- Планировщик ----------
+@router.message(F.text == "📅 План на день")
+async def plan_day_button(message: types.Message, state: FSMContext):
+    await state.clear()  # очищаем старые данные
+    await state.set_state(PlanWaiting.waiting_for_prefs)
+    await state.update_data(period="day")
+    await message.answer(
+        "📅 <b>План на день</b>\n\n"
+        "Напишите ваши пожелания (например, <i>без рыбы, больше овощей</i>) или нажмите <b>«🚫 Без пожеланий»</b>.",
+        parse_mode="HTML",
+        reply_markup=plan_waiting_kb()
+    )
+
+@router.message(F.text == "📅 План на неделю")
+async def plan_week_button(message: types.Message):
+    builder = InlineKeyboardBuilder()
+    days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    for day in days:
+        builder.row(InlineKeyboardButton(text=day, callback_data=f"plan_day:{day}"))
+    await message.answer(
+        "📅 <b>План на неделю</b>\n\nВыберите день недели, на который составить меню:",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("plan_day:"))
+async def plan_specific_day(callback: types.CallbackQuery, state: FSMContext):
+    day = callback.data.split(":")[1]
+    await state.set_state(PlanWaiting.waiting_for_prefs)
+    await state.update_data(period="day", specific_day=day)
+    await callback.message.answer(
+        f"📅 <b>План на {day}</b>\n\n"
+        "Напишите ваши пожелания или нажмите «🚫 Без пожеланий».",
+        parse_mode="HTML",
+        reply_markup=plan_waiting_kb()
+    )
+    await callback.answer()
+
+@router.message(PlanWaiting.waiting_for_prefs, F.text == "🚫 Без пожеланий")
+async def plan_no_prefs(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    period = data.get("period", "day")
+    await state.update_data(preferences="", period=period,
+                            add_wine=False, add_kbju=False, rotate_cuisines=False)
+    await state.set_state(PlanWaiting.waiting_for_options)
+    await show_options_message(message, state, period)
+
+@router.message(PlanWaiting.waiting_for_prefs, F.text)
+async def plan_with_prefs(message: types.Message, state: FSMContext):
+    preferences = message.text.strip()
+    data = await state.get_data()
+    period = data.get("period", "day")
+    await state.update_data(preferences=preferences, period=period,
+                            add_wine=False, add_kbju=False, rotate_cuisines=False)
+    await state.set_state(PlanWaiting.waiting_for_options)
+    await show_options_message(message, state, period)
+
+async def show_options_message(message: types.Message, state: FSMContext, period: str):
+    data = await state.get_data()
+    add_wine = data.get("add_wine", False)
+    add_kbju = data.get("add_kbju", False)
+    rotate = data.get("rotate_cuisines", False)
+
+    wine_text = "✅ Вино" if add_wine else "🍷 Вино"
+    kbju_text = "✅ КБЖУ" if add_kbju else "📊 КБЖУ"
+    rotate_text = "✅ Чередовать кухни" if rotate else "🌍 Чередовать кухни"
+
+    buttons = [
+        [InlineKeyboardButton(text=wine_text, callback_data="toggle_wine")],
+        [InlineKeyboardButton(text=kbju_text, callback_data="toggle_kbju")],
+    ]
+    if period == "week":
+        buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
+    buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
+
+    await message.answer("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
 async def update_options_message(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     add_wine = data.get("add_wine", False)
@@ -808,151 +869,49 @@ async def update_options_message(callback: types.CallbackQuery, state: FSMContex
 
     await callback.message.edit_text("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
-async def show_options_message(message: types.Message, state: FSMContext, period: str):
+@router.callback_query(F.data == "toggle_wine")
+async def toggle_wine(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    new_val = not data.get("add_wine", False)
+    await state.update_data(add_wine=new_val)
+    await update_options_message(callback, state)
+    await callback.answer()
+
+@router.callback_query(F.data == "toggle_kbju")
+async def toggle_kbju(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    new_val = not data.get("add_kbju", False)
+    await state.update_data(add_kbju=new_val)
+    await update_options_message(callback, state)
+    await callback.answer()
+
+@router.callback_query(F.data == "toggle_rotate")
+async def toggle_rotate(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    new_val = not data.get("rotate_cuisines", False)
+    await state.update_data(rotate_cuisines=new_val)
+    await update_options_message(callback, state)
+    await callback.answer()
+
+@router.callback_query(F.data == "start_plan")
+async def start_plan(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    period = data.get("period", "day")
+    specific_day = data.get("specific_day")
+    preferences = data.get("preferences", "")
     add_wine = data.get("add_wine", False)
     add_kbju = data.get("add_kbju", False)
-    rotate = data.get("rotate_cuisines", False)
+    rotate_cuisines = data.get("rotate_cuisines", False)
 
-    wine_text = "✅ Вино" if add_wine else "🍷 Вино"
-    kbju_text = "✅ КБЖУ" if add_kbju else "📊 КБЖУ"
-    rotate_text = "✅ Чередовать кухни" if rotate else "🌍 Чередовать кухни"
-
-    buttons = [
-        [InlineKeyboardButton(text=wine_text, callback_data="toggle_wine")],
-        [InlineKeyboardButton(text=kbju_text, callback_data="toggle_kbju")],
-    ]
-    if period == "week":
-        buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
-    buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
-
-    sent = await message.answer("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-    return sent
-# ---------- Планировщик меню ----------
-@router.message(F.text == "🎯 Коллекции")
-async def collections_menu(message: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎄 Новогодний стол", callback_data="collection:new_year")],
-        [InlineKeyboardButton(text="🥗 Веганская неделя", callback_data="collection:vegan_week")],
-        [InlineKeyboardButton(text="⏱️ Завтраки за 15 минут", callback_data="collection:fast_breakfast")],
-        [InlineKeyboardButton(text="🍝 Итальянский ужин", callback_data="collection:italian_dinner")],
-        [InlineKeyboardButton(text="🧒 Детское меню", callback_data="collection:kids")],
-        [InlineKeyboardButton(text="🍲 Супы со всего мира", callback_data="collection:soups")],
-        [InlineKeyboardButton(text="🥩 Мясные блюда", callback_data="collection:meat")],
-        [InlineKeyboardButton(text="🍣 Азиатская кухня", callback_data="collection:asian")],
-    ])
-    await message.answer("🎯 <b>Тематические коллекции</b>\n\nВыберите подборку, и я составлю меню на день:", parse_mode="HTML", reply_markup=kb)
-
-# ---------- О боте ----------
-@router.message(F.text == "ℹ️ О боте")
-async def about_bot(message: types.Message):
-    await message.answer(
-        "🤖 <b>CookBot</b> — твой персональный шеф-помощник.\n\n"
-        "Я использую искусственный интеллект, чтобы превратить твои продукты в изысканные блюда.\n"
-        "Просто напиши мне список ингредиентов, и я пришлю пошаговый рецепт!\n\n"
-        "🛠 Команды:\n"
-        "/start – главное меню\n"
-        "/setprefs – настройка диеты, аллергий, уровня\n"
-        "/plan – планировщик меню\n"
-        "/help – помощь\n\n"
-        "Приятного аппетита! 🍽️",
-        parse_mode="HTML",
-        reply_markup=make_main_kb(message.from_user.id)
-    )
-
-# ---------- Планировщик ----------
-# ---------- Планировщик с запросом предпочтений ----------
-@router.message(F.text == "📅 План на день")
-async def plan_day_button(message: types.Message, state: FSMContext):
-    await state.set_state(PlanWaiting.waiting_for_prefs)
-    await state.update_data(period="day")
-    await message.answer(
-        "📅 <b>План на день</b>\n\n"
-        "Напишите ваши пожелания (например, <i>без рыбы, больше овощей</i>) или нажмите <b>«🚫 Без пожеланий»</b>.",
-        parse_mode="HTML",
-        reply_markup=plan_waiting_kb()
-    )
-
-@router.callback_query(F.data.startswith("plan_day:"))
-async def plan_specific_day(callback: types.CallbackQuery, state: FSMContext):
-    day = callback.data.split(":")[1]
-    await state.set_state(PlanWaiting.waiting_for_prefs)
-    await state.update_data(period="day", specific_day=day)
-    await callback.message.answer(
-        f"📅 <b>План на {day}</b>\n\n"
-        "Напишите ваши пожелания или нажмите «🚫 Без пожеланий».",
-        parse_mode="HTML",
-        reply_markup=plan_waiting_kb()
-    )
+    await state.clear()
+    await callback.message.edit_text("Запускаю генерацию плана...")
+    await generate_plan(callback.message, period, preferences=preferences,
+                        specific_day=specific_day,
+                        add_wine=add_wine, add_kbju=add_kbju,
+                        rotate_cuisines=rotate_cuisines,
+                        silent=True)
+    await callback.message.answer("Главное меню", reply_markup=make_main_kb(callback.from_user.id))
     await callback.answer()
-
-@router.callback_query(F.data.startswith("collection:"))
-async def handle_collection(callback: types.CallbackQuery):
-    key = callback.data.split(":")[1]
-    base_prompt = COLLECTION_PROMPTS.get(key, "Составь меню на один день.")
-    # Добавляем жёсткое требование одного дня, чтобы модель не плодила лишние
-    prompt = base_prompt + " Верни JSON ровно с одним днём (без названия дня или с названием темы)."
-    await callback.message.answer("📅 Генерирую тематическое меню...")
-    await generate_plan(callback.message, "day", preferences=prompt, silent=True)
-    await callback.answer()
-    
-# Обработчик нажатия на день недели
-@router.callback_query(F.data.startswith("plan_day:"))
-async def plan_specific_day(callback: types.CallbackQuery, state: FSMContext):
-    day = callback.data.split(":")[1]
-    await state.set_state(PlanWaiting.waiting_for_prefs)
-    await state.update_data(period="day", specific_day=day)
-    await callback.message.answer(
-        f"📅 <b>План на {day}</b>\n\nНапишите ваши пожелания или нажмите «🚫 Без пожеланий».",
-        parse_mode="HTML",
-        reply_markup=plan_waiting_kb()
-    )
-    await callback.answer()
-
-@router.message(F.text == "🌍 Вся неделя (чередование)")
-async def full_week_button(message: types.Message, state: FSMContext):
-    await state.set_state(PlanWaiting.waiting_for_prefs)
-    await state.update_data(period="week", rotate_cuisines=True)  # сразу включаем чередование
-    await message.answer(
-        "🌍 <b>Вся неделя с чередованием кухонь</b>\n\n"
-        "Напишите ваши пожелания или нажмите «🚫 Без пожеланий».",
-        parse_mode="HTML",
-        reply_markup=plan_waiting_kb()
-    )
-
-# Обработчики пожеланий
-@router.message(PlanWaiting.waiting_for_prefs, F.text == "🚫 Без пожеланий")
-async def plan_no_prefs(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    period = data.get("period", "day")
-    await state.update_data(preferences="", period=period,
-                            add_wine=False, add_kbju=False, rotate_cuisines=False)
-    await state.set_state(PlanWaiting.waiting_for_options)
-    await show_options_message(message, state, period)
-
-@router.message(PlanWaiting.waiting_for_prefs, F.text)
-async def plan_with_prefs(message: types.Message, state: FSMContext):
-    preferences = message.text.strip()
-    data = await state.get_data()
-    period = data.get("period", "day")
-    await state.update_data(preferences=preferences, period=period,
-                            add_wine=False, add_kbju=False, rotate_cuisines=False)
-    await state.set_state(PlanWaiting.waiting_for_options)
-    await show_options_message(message, state, period)
-
-# Команда /plan
-@router.message(Command("plan"))
-async def plan_command(message: types.Message):
-    args = message.text.split()
-    period = "day"
-    preferences = ""
-    if len(args) > 1:
-        if args[1] in ["day", "week"]:
-            period = args[1]
-            preferences = " ".join(args[2:])
-        else:
-            preferences = " ".join(args[1:])
-    await generate_plan(message, period, preferences)
 
 # ---------- /setprefs ----------
 @router.message(Command("setprefs"))
@@ -1048,96 +1007,28 @@ async def set_skill(callback: types.CallbackQuery):
     await callback.answer(f"Уровень сохранён: {skill}")
     await callback.message.edit_text("✅ Настройки обновлены! Используй /setprefs для просмотра.", reply_markup=None)
 
-async def show_options_message(message: types.Message, state: FSMContext, period: str):
-    data = await state.get_data()
-    add_wine = data.get("add_wine", False)
-    add_kbju = data.get("add_kbju", False)
-    rotate = data.get("rotate_cuisines", False)
-    # Для всей недели кнопка чередования уже включена и не меняется
-    if period == "week" and not rotate:
-        rotate_text = "🌍 Чередовать кухни"
-    else:
-        rotate_text = "✅ Чередовать кухни" if rotate else None
+# ---------- Коллекции ----------
+@router.message(F.text == "🎯 Коллекции")
+async def collections_menu(message: types.Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎄 Новогодний стол", callback_data="collection:new_year")],
+        [InlineKeyboardButton(text="🥗 Веганская неделя", callback_data="collection:vegan_week")],
+        [InlineKeyboardButton(text="⏱️ Завтраки за 15 минут", callback_data="collection:fast_breakfast")],
+        [InlineKeyboardButton(text="🍝 Итальянский ужин", callback_data="collection:italian_dinner")],
+        [InlineKeyboardButton(text="🧒 Детское меню", callback_data="collection:kids")],
+        [InlineKeyboardButton(text="🍲 Супы со всего мира", callback_data="collection:soups")],
+        [InlineKeyboardButton(text="🥩 Мясные блюда", callback_data="collection:meat")],
+        [InlineKeyboardButton(text="🍣 Азиатская кухня", callback_data="collection:asian")],
+    ])
+    await message.answer("🎯 <b>Тематические коллекции</b>\n\nВыберите подборку, и я составлю меню на день:", parse_mode="HTML", reply_markup=kb)
 
-    wine_text = "✅ Вино" if add_wine else "🍷 Вино"
-    kbju_text = "✅ КБЖУ" if add_kbju else "📊 КБЖУ"
-
-    buttons = [
-        [InlineKeyboardButton(text=wine_text, callback_data="toggle_wine")],
-        [InlineKeyboardButton(text=kbju_text, callback_data="toggle_kbju")],
-    ]
-    if rotate_text:
-        buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
-    buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
-
-    await message.answer("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-
-async def update_options_message(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    add_wine = data.get("add_wine", False)
-    add_kbju = data.get("add_kbju", False)
-    rotate = data.get("rotate_cuisines", False)
-    period = data.get("period", "day")
-
-    wine_text = "✅ Вино" if add_wine else "🍷 Вино"
-    kbju_text = "✅ КБЖУ" if add_kbju else "📊 КБЖУ"
-    rotate_text = "✅ Чередовать кухни" if rotate else "🌍 Чередовать кухни"
-
-    buttons = [
-        [InlineKeyboardButton(text=wine_text, callback_data="toggle_wine")],
-        [InlineKeyboardButton(text=kbju_text, callback_data="toggle_kbju")],
-    ]
-    if period == "week":
-        buttons.append([InlineKeyboardButton(text=rotate_text, callback_data="toggle_rotate")])
-    buttons.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data="start_plan")])
-
-    await callback.message.edit_text("Выберите дополнительные опции:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-
-@router.callback_query(F.data == "toggle_wine")
-async def toggle_wine(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    new_val = not data.get("add_wine", False)
-    await state.update_data(add_wine=new_val)
-    # Перерисовываем то же сообщение
-    await update_options_message(callback, state)
-    await callback.answer()
-
-@router.callback_query(F.data == "toggle_kbju")
-async def toggle_kbju(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    new_val = not data.get("add_kbju", False)
-    await state.update_data(add_kbju=new_val)
-    await update_options_message(callback, state)
-    await callback.answer()
-
-@router.callback_query(F.data == "toggle_rotate")
-async def toggle_rotate(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    new_val = not data.get("rotate_cuisines", False)
-    await state.update_data(rotate_cuisines=new_val)
-    await update_options_message(callback, state)
-    await callback.answer()
-
-@router.callback_query(F.data == "start_plan")
-async def start_plan(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    period = data.get("period", "day")
-    specific_day = data.get("specific_day")
-    preferences = data.get("preferences", "")
-    add_wine = data.get("add_wine", False)
-    add_kbju = data.get("add_kbju", False)
-    rotate_cuisines = data.get("rotate_cuisines", False)
-
-    await state.clear()
-    # Удаляем сообщение с опциями
-    await callback.message.edit_text("Запускаю генерацию плана...")
-    # Генерируем
-    await generate_plan(callback.message, period, preferences=preferences,
-                        specific_day=specific_day,
-                        add_wine=add_wine, add_kbju=add_kbju,
-                        rotate_cuisines=rotate_cuisines,
-                        silent=True)
-    await callback.message.answer("Главное меню", reply_markup=make_main_kb(callback.from_user.id))
+@router.callback_query(F.data.startswith("collection:"))
+async def handle_collection(callback: types.CallbackQuery):
+    key = callback.data.split(":")[1]
+    base_prompt = COLLECTION_PROMPTS.get(key, "Составь меню на один день.")
+    prompt = base_prompt + " Верни JSON ровно с одним днём (без названия дня или с названием темы)."
+    await callback.message.answer("📅 Генерирую тематическое меню...")
+    await generate_plan(callback.message, "day", preferences=prompt, silent=True)
     await callback.answer()
 
 # ---------- Инлайн-режим ----------
@@ -1148,7 +1039,6 @@ async def inline_recipe(inline_query: types.InlineQuery):
         return
 
     recipes = []
-    # Делаем до 3 попыток получить разные рецепты
     for attempt in range(3):
         extra_context = f"Вариант {attempt+1}. Предложи блюдо, отличное от предыдущих: "
         recipe, _ = await get_recipe(query, extra_context=extra_context)
