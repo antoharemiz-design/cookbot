@@ -69,13 +69,16 @@ async def init_db():
                 cooked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("DROP TABLE IF EXISTS quests")
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS quests (
-                user_id INTEGER PRIMARY KEY,
+            CREATE TABLE quests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
                 quest_date DATE NOT NULL,
                 quest_type TEXT NOT NULL,
                 description TEXT NOT NULL,
-                completed INTEGER DEFAULT 0
+                completed INTEGER DEFAULT 0,
+                UNIQUE(user_id, quest_date)
             )
         """)
         await db.execute("""
